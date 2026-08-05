@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}Scraper Log · Fútbol de Fantasía{% endblock %}
+
+{% block content %}
+<section class="section">
+  <h2 class="section-title">📋 Scraper Audit Log</h2>
+  <p style="color:var(--text-secondary);margin-top:-8px">
+    Every scrape run, what it captured, and what it didn't. Newest first.
+  </p>
+
+  {% if scraper_status.status == 'running' %}
+  <div class="table-wrap" style="padding:14px 20px;margin-bottom:16px">
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:10px">
+      <span>⏳ Scraper shows <strong>running</strong> since {{ scraper_status.started_at }}. If it's actually stuck (crashed without finishing), you can force it back to idle.</span>
+      <button type="button" class="action-btn" onclick="forceResetScraper()">⚠️ Force Reset</button>
+    </div>
+    <div id="scraperProgressFeed" style="font-size:0.9em;color:var(--text-secondary);max-height:240px;overflow-y:auto;border-top:1px solid var(--border);padding-top:10px;line-height:1.7">
+      Waiting for the first match to start...
+    </div>
+  </div>
+  <script>
+    async function forceResetScraper() {
+      if (!confirm('Force the scraper status back to idle? Only do this if you\'re sure no scrape is actually running.')) return;
+      await fetch('/api/scraper/force-reset', { method: 'POST' });
+      window.location.reload();
+    }
+
+    // Live in-progress feed — polls the same /api/scrape/status endpoint the
+    // site-wide banner uses, but renders a running per-match feed instead of
+    // a single overwritten line, so it's still useful if you navigate here
+    // mid-scrape rather than just watching the banner.
+    (function() {
+      const feedEl = document.getElementById('scraperProgressFeed');
+      const seen = new Set();
+      const lines = [];
+
+      function outcomeLabel(outcome) {
+        return {
+          perfect: '✅ perfect match', saved: '✅ saved', discrepancy: '⚠️ discrepancy found',
+          error: '❌ error', timeout: '❌ timed out',
+        }[outcome] || outcome;
+      }
+
+      function renderLine(p) {
+        const fixture = `${p.home} vs ${p.away}`;
+        if (p.stage === 'done') {
+          return `Match ${p.match_index}/${p.match_total} — ${fixture}: ${outcomeLabel(p.outcome)}`;
+        }
+        return `Match ${p.match_index}/${p.match_total} — ${fixture}: scraping...`;
+      }
+
+      async function poll() {
+        try {
+          const res  = await fetch('/api/scrape/status');
+          const data = await res.json();
+          if (data.status !== 'running') {
+            window.location.reload();
+            return;
+          }
+          if (data.progress) {
+            const key = `${data.progress.gw}-${data.progress.match_index}-${data.progress.stage}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              lines.push(renderLine(data.progress));
+              feedEl.innerHTML = lines.map(l => `<div>${l}</div>`).join('');
+              feedEl.scrollTop = feedEl.scrollHeight;
+            }
+          }
+        } catch (e) {}
+        setTimeout(poll, 5000);
+      }
+      poll();
+    })();
+  </script>
+  {% endif %}
+
+  {% if not runs %}
+  <div class="table-wrap" style="padding:28px;text-align:center;color:var(--text-secondary)">
+    No scraper runs recorded yet.
+  </div>
+  {% endif %}
+
+  {% for run in runs %}
+  <div class="table-wrap" style="margin-bottom:14px;padding:0;overflow:hidden">
+    <details>
+      <summary style="cursor:pointer;padding:14px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <span>
+          {% if run.status == 'complete' %}✅{% elif run.status == 'error' and run.perfect_count > 0 %}⚠️{% else %}❌{% endif %}
+        </span>
+        <strong>GW{{ run.gw_start }}{% if run.gw_end != run.gw_start %}–GW{{ run.gw_end }}{% endif %}</strong>
+        <span style="color:var(--text-secondary)">{{ run.completed_at }}</span>
+        <span style="margin-left:auto;font-size:0.9em;color:var(--text-secondary)">
+          ✅ {{ run.perfect_count }} perfect &nbsp;·&nbsp;
+          ⚠️ {{ run.discrepancy_count }} discrepancy &nbsp;·&nbsp;
+          ❌ {{ run.error_count }} failed &nbsp;/&nbsp; {{ run.total_fixtures }} total
+        </span>
+      </summary>
+
+      <div style="padding:0 20px 18px 20px">
+        {% if run.summary %}
+        <p style="margin:10px 0;color:var(--text-secondary)">{{ run.summary }}</p>
+        {% endif %}
+
+        {% if run.detail.perfect %}
+        <div style="margin-top:8px">
+          <strong style="font-size:0.9em">✅ Perfect ({{ run.detail.perfect|length }})</strong>
+          <ul style="margin:6px 0 0 0;padding-left:20px;font-size:0.9em;color:var(--text-secondary)">
+            {% for item in run.detail.perfect %}<li>{{ item }}</li>{% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+
+        {% if run.detail.discrepancies %}
+        <div style="margin-top:12px">
+          <strong style="font-size:0.9em">⚠️ Discrepancies ({{ run.detail.discrepancies|length }})</strong>
+          <ul style="margin:6px 0 0 0;padding-left:20px;font-size:0.9em;color:var(--text-secondary)">
+            {% for item in run.detail.discrepancies %}<li>{{ item }}</li>{% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+
+        {% if run.detail.errors %}
+        <div style="margin-top:12px">
+          <strong style="font-size:0.9em">❌ Errors ({{ run.detail.errors|length }})</strong>
+          <ul style="margin:6px 0 0 0;padding-left:20px;font-size:0.9em;color:var(--text-secondary)">
+            {% for item in run.detail.errors %}<li>{{ item }}</li>{% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+
+        {% if run.detail.tab_failures %}
+        <div style="margin-top:12px">
+          <strong style="font-size:0.9em">⚠️⚠️ Tab load failures — likely need --rescrape ({{ run.detail.tab_failures|length }})</strong>
+          <ul style="margin:6px 0 0 0;padding-left:20px;font-size:0.9em;color:var(--text-secondary)">
+            {% for item in run.detail.tab_failures %}<li>{{ item }}</li>{% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+
+        {% if not run.detail.perfect and not run.detail.discrepancies and not run.detail.errors and not run.detail.tab_failures %}
+        <p style="color:var(--text-secondary);font-size:0.9em;margin:8px 0 0 0">No per-fixture detail recorded for this run.</p>
+        {% endif %}
+      </div>
+    </details>
+  </div>
+  {% endfor %}
+</section>
+{% endblock %}

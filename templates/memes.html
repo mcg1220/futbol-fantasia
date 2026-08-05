@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block title %}Locker Room · Fútbol de Fantasía{% endblock %}
+
+{% block content %}
+<section class="section">
+  <h2 class="section-title">🎭 Locker Room</h2>
+  <p style="color:var(--text-secondary);margin-top:-8px">
+    Memes, reactions, and banter. Post an image, a link, or build one from scratch.
+  </p>
+
+  <div class="table-wrap" style="padding:16px 20px;margin-top:16px;margin-bottom:16px">
+    <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="gw-jump-label">Posting as</label>
+        <select id="meme-as-manager" class="gw-jump-select" style="width:220px" onchange="onMemeManagerChange()">
+          <option value="">— Select manager —</option>
+          {% for m in managers %}
+          <option value="{{ m.id }}">{{ m.name }} ({{ m.team_name }})</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="table-wrap" style="padding:16px 20px;margin-bottom:16px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button type="button" class="action-btn" onclick="openUploadComposer()">🖼️ Upload Image/GIF</button>
+      <button type="button" class="action-btn" onclick="openLinkComposer()">🔗 Paste a Link</button>
+      <button type="button" class="action-btn" onclick="openMemeCanvas()">🎨 Build a Meme</button>
+    </div>
+  </div>
+
+  <div id="meme-feed" style="display:flex;flex-direction:column;gap:16px"></div>
+  <div id="meme-feed-sentinel" style="height:1px"></div>
+  <div id="meme-feed-loading" style="text-align:center;padding:16px;color:var(--text-muted);display:none">Loading more…</div>
+  <div id="meme-feed-end" style="text-align:center;padding:16px;color:var(--text-muted);display:none">You've reached the bottom.</div>
+</section>
+
+<!-- ── Upload composer modal ─────────────────────────────────────────────── -->
+<div id="upload-composer-modal" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <h3>Upload Image/GIF</h3>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <input type="file" id="upload-file-input" accept="image/png,image/jpeg,image/gif,image/webp" />
+      <input type="text" id="upload-caption-input" class="player-search-input" placeholder="Caption (optional)" />
+      <div id="upload-error" style="display:none;color:var(--pl-magenta);font-size:13px"></div>
+      <div style="display:flex;gap:8px">
+        <button type="button" class="primary-btn" onclick="submitUploadComposer()">Post</button>
+        <button type="button" class="action-btn" onclick="closeModal('upload-composer-modal')">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Link composer modal ───────────────────────────────────────────────── -->
+<div id="link-composer-modal" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <h3>Paste a Link</h3>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <input type="text" id="link-url-input" class="player-search-input" placeholder="https://..." />
+      <input type="text" id="link-caption-input" class="player-search-input" placeholder="Caption (optional)" />
+      <div id="link-error" style="display:none;color:var(--pl-magenta);font-size:13px"></div>
+      <div style="display:flex;gap:8px">
+        <button type="button" class="primary-btn" onclick="submitLinkComposer()">Post</button>
+        <button type="button" class="action-btn" onclick="closeModal('link-composer-modal')">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Edit post modal (image/link, non-canvas) ────────────────────────────── -->
+<div id="edit-post-modal" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <h3>Edit Post</h3>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div id="edit-image-field" style="display:none">
+        <label class="gw-jump-label">Replace image (optional)</label>
+        <input type="file" id="edit-file-input" accept="image/png,image/jpeg,image/gif,image/webp" />
+        <button type="button" class="action-btn" style="margin-top:8px" onclick="openMemeCanvasForEdit()">🎨 Edit in Canvas Instead</button>
+      </div>
+      <div id="edit-link-field" style="display:none">
+        <label class="gw-jump-label">URL</label>
+        <input type="text" id="edit-link-input" class="player-search-input" />
+      </div>
+      <label class="gw-jump-label">Caption</label>
+      <input type="text" id="edit-caption-input" class="player-search-input" placeholder="Caption (optional)" />
+      <div id="edit-error" style="display:none;color:var(--pl-magenta);font-size:13px"></div>
+      <div style="display:flex;gap:8px">
+        <button type="button" class="primary-btn" onclick="submitEditPost()">Save</button>
+        <button type="button" class="action-btn" onclick="closeModal('edit-post-modal')">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Meme canvas editor modal ─────────────────────────────────────────────── -->
+<div id="meme-canvas-modal" class="modal-overlay" style="display:none">
+  <div class="modal-box modal-box-wide">
+    <h3>Build a Meme</h3>
+    <div style="display:flex;gap:14px;flex-wrap:wrap">
+      <div>
+        <canvas id="meme-fabric-canvas" width="640" height="480"></canvas>
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+          <label class="action-btn" style="cursor:pointer;margin:0">
+            + Add Image
+            <input type="file" id="canvas-add-image-input" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none" onchange="canvasAddImage(event)" />
+          </label>
+          <button type="button" class="action-btn" onclick="canvasAddText()">+ Add Text</button>
+          <button type="button" class="action-btn" onclick="canvasAddShape('rect')">+ Add Rectangle</button>
+          <button type="button" class="action-btn" onclick="canvasAddShape('circle')">+ Add Circle</button>
+          <button type="button" class="action-btn" onclick="canvasBringToFront()">Bring to Front</button>
+          <button type="button" class="action-btn" onclick="canvasSendToBack()">Send to Back</button>
+          <button type="button" class="action-btn" onclick="canvasStartCrop()">Crop Selected Image</button>
+          <button type="button" class="action-btn" onclick="canvasApplyCrop()" id="canvas-apply-crop-btn" style="display:none">Apply Crop</button>
+          <button type="button" class="action-btn" onclick="canvasDeleteSelected()">Delete Selected</button>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px;align-items:center">
+          <input type="text" id="canvas-image-url-input" class="player-search-input" placeholder="Paste an image link (e.g. from Google Images)..." style="flex:1" />
+          <button type="button" class="action-btn" onclick="canvasAddImageFromUrl()">Add Image from Link</button>
+        </div>
+        <div id="canvas-url-error" style="display:none;color:var(--pl-magenta);font-size:13px;margin-top:6px"></div>
+      </div>
+      <div style="min-width:160px;display:flex;flex-direction:column;gap:8px">
+        <div class="gw-jump-label">Selected object</div>
+
+        <label class="gw-jump-label" style="margin:0;font-size:11px">Rotation (°)</label>
+        <input type="number" id="canvas-obj-rotation" value="0" min="0" max="360" onchange="canvasUpdateObjectTransform()" />
+
+        <label class="gw-jump-label" style="margin:0;font-size:11px">Fill color</label>
+        <input type="color" id="canvas-obj-fill" value="#ffffff" onchange="canvasUpdateObjectFill()" />
+
+        <label class="gw-jump-label" style="margin:0;font-size:11px">Stroke color</label>
+        <input type="color" id="canvas-text-stroke" value="#000000" onchange="canvasUpdateObjectStroke()" />
+        <label class="gw-jump-label" style="margin:0;font-size:11px">Stroke width</label>
+        <input type="number" id="canvas-text-stroke-width" value="2" min="0" max="10" onchange="canvasUpdateObjectStroke()" />
+
+        <div id="canvas-text-only-controls" style="display:none;flex-direction:column;gap:8px">
+          <label class="gw-jump-label" style="margin:0;font-size:11px">Font size</label>
+          <input type="number" id="canvas-text-size" value="32" min="8" max="200" onchange="canvasUpdateTextStyle()" placeholder="Font size" />
+          <label class="gw-jump-label" style="margin:0;font-size:11px">Font</label>
+          <select id="canvas-text-font" class="gw-jump-select" onchange="canvasUpdateTextStyle()">
+            <option value="Impact">Impact</option>
+            <option value="Arial">Arial</option>
+            <option value="Georgia">Georgia</option>
+            <option value="Courier New">Courier New</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <input type="text" id="canvas-caption-input" class="player-search-input" placeholder="Caption (optional)" style="margin-top:12px;width:100%" />
+    <div id="canvas-error" style="display:none;color:var(--pl-magenta);font-size:13px;margin-top:8px"></div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button type="button" class="primary-btn" onclick="canvasSave()">Save Meme</button>
+      <button type="button" class="action-btn" onclick="closeModal('meme-canvas-modal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/fabric@5.3.0/dist/fabric.min.js"></script>
+<script async src="https://platform.twitter.com/widgets.js"></script>
+<script>
+const MANAGERS = {{ managers|tojson }};
+const INITIAL_POSTS = {{ posts|tojson }};
+let HAS_MORE = {{ has_more|tojson }};
+const EMOJI_PALETTE = ['👍', '😂', '🔥', '💀', '❤️', '🎉'];
+</script>
+<script src="{{ url_for('static', filename='js/memes_feed.js') }}"></script>
+<script src="{{ url_for('static', filename='js/meme_canvas.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}My Team · Fútbol de Fantasía{% endblock %}
+
+{% block content %}
+<section class="section">
+  <h2 class="section-title">👕 My Team</h2>
+  <div class="team-select-card">
+    <p class="team-select-prompt">Select a manager to view their team:</p>
+    <div class="team-select-grid">
+      {% for m in managers %}
+      <a href="/team/{{ m.id }}" class="team-select-btn">
+        {% if m.photo_path %}
+        <img src="{{ url_for('static', filename=m.photo_path) }}" class="team-avatar team-avatar-md" />
+        {% else %}
+        <div class="team-avatar team-avatar-md team-avatar-placeholder">{{ m.name[0]|upper }}</div>
+        {% endif %}
+        <div class="tsb-text">
+          <span class="tsb-name">{{ m.name }}</span>
+          <span class="tsb-team">{{ m.team_name }}</span>
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+{% endblock %}

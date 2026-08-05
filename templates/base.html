@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Fútbol de Fantasía{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  <script>
+    (function() {
+      const saved = localStorage.getItem('theme');
+      if (saved === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+    })();
+  </script>
+</head>
+<body>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-brand">
+        <span class="brand-icon">🦁</span>
+        <span class="brand-name">Fútbol de Fantasía</span>
+      </div>
+      <nav class="site-nav">
+        <a href="/"         class="nav-link {% if request.path == '/' %}active{% endif %}">⚽ Standings</a>
+        <a href="/gameweek" class="nav-link {% if request.path.startswith('/gameweek') %}active{% endif %}">📅 Gameweek</a>
+        <a href="/team"     class="nav-link {% if request.path.startswith('/team') %}active{% endif %}">👕 Teams</a>
+        <a href="/draft"    class="nav-link {% if request.path.startswith('/draft') %}active{% endif %}">🎙️ Draft</a>
+        <a href="/history"  class="nav-link {% if request.path.startswith('/history') %}active{% endif %}">📊 Add/Drop &amp; Waivers</a>
+        <a href="/memes"    class="nav-link {% if request.path.startswith('/memes') %}active{% endif %}">🎭 Locker Room</a>
+        <a href="/playoffs" class="nav-link {% if request.path.startswith('/playoffs') %}active{% endif %}">🏆 Playoffs</a>
+        <details class="nav-dropdown" id="otherNavDropdown">
+          <summary class="nav-link {% if request.path.startswith('/transfers') or request.path.startswith('/scraper-log') or request.path.startswith('/audit-history') %}active{% endif %}">⋯ Other</summary>
+          <div class="nav-dropdown-menu">
+            <a href="/transfers"      class="nav-dropdown-item {% if request.path.startswith('/transfers') %}active{% endif %}">🔁 Transfer Room</a>
+            <a href="/scraper-log"    class="nav-dropdown-item {% if request.path.startswith('/scraper-log') %}active{% endif %}">📡 Scraper Log</a>
+            <a href="/audit-history"  class="nav-dropdown-item {% if request.path.startswith('/audit-history') %}active{% endif %}">📜 Audit History</a>
+          </div>
+        </details>
+        <button class="theme-toggle" id="themeToggle" title="Toggle dark/light mode">☀️</button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- ── Scraper banner ──────────────────────────────────────────────────── -->
+  <div id="scraperBanner" class="scraper-banner" style="display:none"></div>
+
+  <main class="site-main">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">
+    <span>🦁 Fútbol de Fantasía · {{ season if season is defined else '2026–27' }}</span>
+  </footer>
+
+  <script>
+    // ── Theme toggle ───────────────────────────────────────────────────────
+    const toggle = document.getElementById('themeToggle');
+    const html   = document.documentElement;
+
+    function updateIcon() {
+      toggle.textContent = html.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+    }
+    updateIcon();
+
+    toggle.addEventListener('click', () => {
+      const isDark = html.getAttribute('data-theme') === 'dark';
+      isDark ? html.removeAttribute('data-theme') : html.setAttribute('data-theme', 'dark');
+      localStorage.setItem('theme', isDark ? 'light' : 'dark');
+      updateIcon();
+    });
+
+    // ── "Other" nav dropdown ──────────────────────────────────────────────
+    const otherDropdown = document.getElementById('otherNavDropdown');
+    if (otherDropdown) {
+      document.addEventListener('click', (e) => {
+        if (otherDropdown.open && !otherDropdown.contains(e.target)) {
+          otherDropdown.open = false;
+        }
+      });
+    }
+
+    // ── Scraper banner ─────────────────────────────────────────────────────
+    const banner      = document.getElementById('scraperBanner');
+    let   wasRunning  = false;
+
+    function calcETA(startedIso) {
+      try {
+        const start = new Date(startedIso);
+        const eta   = new Date(start.getTime() + 15 * 60 * 1000);
+        return eta.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      } catch(e) { return null; }
+    }
+
+    // Turns a scraper_status.json "progress" blob (written match-by-match by
+    // run_scraper_background as it streams scrape_gw.py's PROGRESS: lines)
+    // into a short live status string, so the banner shows real work
+    // happening instead of just a static "since HH:MM" timestamp.
+    function formatProgress(p) {
+      if (!p) return null;
+      const fixture = `${p.home} vs ${p.away}`;
+      if (p.stage === 'done') {
+        const outcomeLabel = {
+          perfect: '✅ perfect match', saved: '✅ saved', discrepancy: '⚠️ discrepancy found',
+          error: '❌ error', timeout: '❌ timed out',
+        }[p.outcome] || p.outcome;
+        return `GW${p.gw} — match ${p.match_index}/${p.match_total} (${fixture}): ${outcomeLabel}`;
+      }
+      return `GW${p.gw} — match ${p.match_index}/${p.match_total}: ${fixture} — scraping...`;
+    }
+
+    function updateBanner(data) {
+      const justFinished = wasRunning && data.status !== 'running';
+
+      if (data.status === 'running') {
+        wasRunning = true;
+        const eta  = data.started_at_iso ? calcETA(data.started_at_iso) : null;
+        const etaStr = eta ? ` · Usually takes ~15 min — estimated completion around <strong>${eta}</strong>` : ' · Usually takes ~15 min';
+        const progressStr = formatProgress(data.progress);
+        const statusStr = progressStr ? ` · <strong>${progressStr}</strong>` : etaStr;
+        banner.className = 'scraper-banner banner-running';
+        banner.innerHTML = `⏳ <strong>Scraper running</strong> since ${data.started_at}${statusStr}. Please don't press the button again.`;
+        banner.style.display = 'block';
+        document.querySelectorAll('.scrape-btn').forEach(b => {
+          b.disabled = true;
+          b.textContent = '⏳ Running...';
+        });
+        setTimeout(pollScraper, 5000);
+
+      } else if (data.status === 'complete') {
+        banner.className = 'scraper-banner banner-complete';
+        banner.innerHTML = `✅ Scores last updated: <strong>${data.completed_at}</strong> — GW${data.gw}`;
+        banner.style.display = 'block';
+        document.querySelectorAll('.scrape-btn').forEach(b => {
+          b.disabled = false;
+          b.textContent = '🔄 Press the Button';
+        });
+        // Auto-reload page when scraper finishes so data is fresh
+        if (justFinished) window.location.reload();
+
+      } else if (data.status === 'error') {
+        banner.className = 'scraper-banner banner-error';
+        const reason = data.error ? `: ${data.error}` : '. Try again or check logs.';
+        banner.innerHTML = `❌ Scraper failed at ${data.completed_at}${reason} · <a href="/scraper-log" style="color:inherit;text-decoration:underline">View Log</a>`;
+        banner.style.display = 'block';
+        document.querySelectorAll('.scrape-btn').forEach(b => {
+          b.disabled = false;
+          b.textContent = '🔄 Press the Button';
+        });
+        if (justFinished) window.location.reload();
+
+      } else {
+        wasRunning = false;
+        banner.style.display = 'none';
+      }
+    }
+
+    async function pollScraper() {
+      try {
+        const res  = await fetch('/api/scrape/status');
+        const data = await res.json();
+        updateBanner(data);
+      } catch(e) {}
+    }
+
+    pollScraper();
+  </script>
+
+</body>
+</html>

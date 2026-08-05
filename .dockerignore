@@ -1,0 +1,21 @@
+# Local-only — production data lives on the host's persistent disk instead,
+# seeded once during the Phase 3 data migration, not baked into the image.
+data/fantasia.db
+data/fantasia.db.bak-*
+static/uploads/team_photos/*
+static/uploads/memes/*
+!static/uploads/team_photos/.gitkeep
+!static/uploads/memes/.gitkeep
+
+venv/
+__pycache__/
+*.pyc
+
+.git/
+.gitignore
+
+# Scratch/working files not needed at runtime
+fantrax schedule and projections/
+working instructions/
+*.docx
+history/

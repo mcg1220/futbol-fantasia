@@ -1,0 +1,959 @@
+{% extends "base.html" %}
+{% block title %}Draft · Fútbol de Fantasía{% endblock %}
+
+{% block content %}
+<section class="section">
+  <h2 class="section-title">🎙️ Draft</h2>
+
+  <div class="tab-bar" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+    <button type="button" class="tab-btn active" id="tab-btn-maindraft" onclick="showDraftTab('maindraft')">🎙️ Main Draft</button>
+    <button type="button" class="tab-btn" id="tab-btn-summer" onclick="showDraftTab('summer')">☀️ Summer Transfer</button>
+    <button type="button" class="tab-btn" id="tab-btn-winter" onclick="showDraftTab('winter')">❄️ Winter Transfer</button>
+  </div>
+
+  <div id="tab-maindraft">
+  {% if state.status in ('not_started', 'randomizing') %}
+  <!-- ── Randomizer ─────────────────────────────────────────────────────── -->
+  <div class="table-wrap draft-randomizer" style="padding:28px;text-align:center">
+    <h3 style="margin-top:0">Draft Order Randomizer</h3>
+    <p style="color:var(--text-secondary)">
+      Spin {{ state.spin_count }} of 3 completed. The 3rd spin locks in the final order.
+    </p>
+    <div id="randomizer-display" class="randomizer-display"></div>
+    <button type="button" class="primary-btn" id="spin-btn" onclick="spin()">🎲 Run Randomizer</button>
+  </div>
+  {% endif %}
+
+  {% if state.status == 'ready' %}
+  <div class="table-wrap" style="padding:28px;text-align:center">
+    <h3 style="margin-top:0">✅ Draft Order Locked In</h3>
+    <div class="draft-order-list">
+      {% for m in order %}
+      <div class="draft-order-item">
+        <span class="draft-order-num">{{ m.pick_slot }}</span>
+        {% if m.photo_path %}
+        <img src="{{ url_for('static', filename=m.photo_path) }}" class="team-avatar team-avatar-sm" />
+        {% else %}
+        <div class="team-avatar team-avatar-sm team-avatar-placeholder">{{ m.name[0]|upper }}</div>
+        {% endif %}
+        <span>{{ m.name }} — {{ m.team_name }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    <button type="button" class="primary-btn" style="margin-top:16px" onclick="startDraft()">🏁 Start Draft</button>
+  </div>
+  {% endif %}
+
+  {% if state.status in ('in_progress', 'complete', 'locked') %}
+  <div class="table-wrap" style="padding:16px 20px;margin-bottom:16px" id="draft-status-banner">
+    {% if state.status == 'locked' %}
+    <strong>🔒 Draft locked.</strong> <a href="/draft/recap">View the full recap →</a>
+    <button type="button" class="action-btn" style="margin-left:10px" onclick="unlockDraft()">Unlock</button>
+    {% elif state.status == 'complete' %}
+    <strong>🏁 Draft complete!</strong> <a href="/draft/recap">View the full recap →</a>
+    <button type="button" class="primary-btn" style="margin-left:10px" onclick="lockDraft()">🔒 Lock Draft</button>
+    {% else %}
+    <strong id="pick-progress">Pick {{ state.current_pick_number }} of {{ total_picks }}</strong>
+    · <span id="on-the-clock">—</span>
+    {% endif %}
+  </div>
+
+  <!-- ── Snake draft matrix ────────────────────────────────────────────── -->
+  <div class="table-wrap" style="padding:16px 20px;margin-bottom:16px">
+    <h3 style="margin-top:0;margin-bottom:10px">🐍 Draft Board</h3>
+    <div class="snake-matrix-wrap">
+      <table class="snake-matrix" id="snake-matrix">
+        <thead>
+          <tr>
+            <th class="snake-round-label"></th>
+            {% for m in order %}
+            <th>
+              <div class="snake-col-header">
+                {% if m.photo_path %}
+                <img src="{{ url_for('static', filename=m.photo_path) }}" class="team-avatar team-avatar-sm" />
+                {% else %}
+                <div class="team-avatar team-avatar-sm team-avatar-placeholder">{{ m.name[0]|upper }}</div>
+                {% endif %}
+                <span>{{ m.name }}</span>
+              </div>
+            </th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for round in range(1, state.rounds + 1) %}
+          <tr>
+            <td class="snake-round-label">R{{ round }} {% if round % 2 == 0 %}←{% else %}→{% endif %}</td>
+            {% for m in order %}
+            {% set overall = (round - 1) * 8 + (m.pick_slot if round % 2 == 1 else 9 - m.pick_slot) %}
+            <td class="snake-cell" id="snake-cell-{{ overall }}" data-overall="{{ overall }}">
+              <span class="snake-pick-num">{{ overall }}</span>
+              <span class="snake-pick-player"></span>
+            </td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Team roster strip ─────────────────────────────────────────────── -->
+  <div class="draft-team-strip" id="draft-team-strip">
+    {% for m in managers %}
+    <div class="draft-team-card" id="draft-team-card-{{ m.id }}">
+      <div class="draft-team-card-header">
+        {% if m.photo_path %}
+        <img src="{{ url_for('static', filename=m.photo_path) }}" class="team-avatar team-avatar-sm" />
+        {% else %}
+        <div class="team-avatar team-avatar-sm team-avatar-placeholder">{{ m.name[0]|upper }}</div>
+        {% endif %}
+        <div>
+          <div class="draft-team-card-name">{{ m.name }}</div>
+          <div class="draft-team-card-team">{{ m.team_name }}</div>
+        </div>
+      </div>
+      <div class="draft-team-card-elig" id="draft-elig-{{ m.id }}"></div>
+      <div class="draft-team-card-roster" id="draft-roster-{{ m.id }}"></div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- ── Player pool ────────────────────────────────────────────────────── -->
+  <div class="table-wrap" style="padding:20px;margin-top:16px">
+    <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="gw-jump-label">Picking as</label>
+        <select id="as-manager-select" class="gw-jump-select" style="width:200px">
+          <option value="">— Select manager —</option>
+          {% for m in managers %}
+          <option value="{{ m.id }}">{{ m.name }} ({{ m.team_name }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="gw-jump-label">&nbsp;</label>
+        <button type="button" class="action-btn" onclick="startTokenClaim()" title="Spend this pick on your Summer Transfer token instead of a player">⚡ Claim Summer Transfer Token</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="gw-jump-label">View as <span style="font-weight:400;color:var(--text-muted)">(my picks + available)</span></label>
+        <select id="view-as-select" class="gw-jump-select" style="width:200px" onchange="applyFilters()">
+          <option value="">— All players —</option>
+          {% for m in managers %}
+          <option value="{{ m.id }}">{{ m.name }} ({{ m.team_name }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:200px">
+        <label class="gw-jump-label">Search players</label>
+        <input type="text" class="player-search-input" id="player-search" placeholder="Filter by name or club..." oninput="applyFilters()" />
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="gw-jump-label">Eligible for <span style="font-weight:400;color:var(--text-muted)">(all checked)</span></label>
+        <div style="display:flex;gap:10px;padding-top:4px">
+          {% for pos in ['GK', 'DEF', 'MID', 'FW'] %}
+          <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer">
+            <input type="checkbox" class="position-checkbox" value="{{ pos }}" onchange="applyFilters()" /> {{ pos }}
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="gw-jump-label">&nbsp;</label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="hide-drafted-checkbox" onchange="applyFilters()" /> Hide drafted players
+        </label>
+      </div>
+    </div>
+
+    <div class="table-wrap pool-table-wrap">
+      <table class="data-table pool-table-sticky" id="pool-table">
+        <thead>
+          <tr>
+            <th class="pool-sticky-col pool-sticky-0">Draft</th>
+            <th class="sortable pool-sticky-col pool-sticky-1" style="text-align:left" onclick="sortPool(1)">Player</th>
+            <th class="sortable pool-sticky-col pool-sticky-2" style="text-align:left" onclick="sortPool(2)">Club</th>
+            <th class="pool-sticky-col pool-sticky-3" style="text-align:left">Eligible</th>
+            <th style="text-align:left">Status</th>
+            <th class="sortable" data-type="num" onclick="sortPool(5)">2025–26 FPts</th>
+            <th class="sortable" data-type="num" onclick="sortPool(6)">2025–26 Avg</th>
+            <th class="sortable" data-type="num" onclick="sortPool(7)" title="2026-27 projected total points">Proj FPts</th>
+            <th class="sortable" data-type="num" onclick="sortPool(8)" title="2026-27 projected average points">Proj Avg</th>
+            {% for key, label, title in stat_cols %}
+            <th class="sortable" data-type="num" onclick="sortPool({{ loop.index + 8 }})" title="2025-26 total {{ title }}">{{ label }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in browse_players %}
+          <tr class="pool-row" data-player="{{ p.name|lower }} {{ p.club|lower }}"
+              data-eligibility="{{ p.eligibility|join(',') }}" data-name="{{ p.name }}"
+              data-owner="{{ p.owner_manager_id or '' }}"
+              id="pool-row-{{ p.name|replace(' ', '_') }}">
+            <td class="pool-action-cell pool-sticky-col pool-sticky-0">
+              {% if not p.owner_manager_id %}
+              <button type="button" class="action-btn" onclick="startDraftPick('{{ p.name }}')">Draft</button>
+              {% endif %}
+            </td>
+            <td style="text-align:left;font-weight:600" class="player-name-cell pool-sticky-col pool-sticky-1" onclick="togglePoolHistory('{{ p.name }}')">
+              <span class="expand-caret">▸</span> {{ p.name }}
+            </td>
+            <td style="text-align:left" class="pool-sticky-col pool-sticky-2">{{ p.club }}</td>
+            <td style="text-align:left" class="pool-sticky-col pool-sticky-3">
+              {% for pos in p.eligibility %}<span class="pos-badge">{{ pos }}</span>{% endfor %}
+            </td>
+            <td style="text-align:left" class="pool-status-cell">
+              {% if p.owner_name %}<span style="color:var(--pl-magenta)">Drafted — {{ p.owner_name }}</span>
+              {% else %}<span style="color:var(--text-muted)">Available</span>{% endif %}
+            </td>
+            <td>{{ '%.2f'|format(p.pts_2025_26) }}</td>
+            <td>{{ '%.2f'|format(p.avg_2025_26) }}</td>
+            <td>{{ '%.2f'|format(p.proj_total) if p.proj_total is not none else '—' }}</td>
+            <td>{{ '%.2f'|format(p.proj_avg) if p.proj_avg is not none else '—' }}</td>
+            {% for key, label, title in stat_cols %}
+            <td>{{ p.stats.get(key) or 0 }}</td>
+            {% endfor %}
+          </tr>
+          <tr class="pool-history-row" data-name="{{ p.name }}" style="display:none">
+            <td colspan="{{ 9 + stat_cols|length }}" class="game-log-table-wrap">
+              <div class="player-history-panel" id="pool-history-panel-{{ loop.index }}">Loading...</div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if state.status == 'complete' %}
+  <div style="margin-top:16px">
+    <button type="button" class="action-btn" onclick="resetDraft()">↺ Reset Draft (start over)</button>
+  </div>
+  {% endif %}
+  </div>
+
+  <div id="tab-summer" style="display:none">
+    <div id="transfer-summer-root"></div>
+  </div>
+
+  <div id="tab-winter" style="display:none">
+    <div id="transfer-winter-root"></div>
+  </div>
+</section>
+
+<!-- ── Confirm pick modal ───────────────────────────────────────────────── -->
+<div id="confirm-modal" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <h3 id="confirm-modal-title">Confirm your pick</h3>
+    <p id="confirm-modal-body"></p>
+    <div style="display:flex;gap:8px">
+      <button type="button" class="primary-btn" onclick="confirmDraftPick()">✅ Confirm Pick</button>
+      <button type="button" class="action-btn" onclick="closeConfirmModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Transfer draft: drop-player picker modal (roster is always full) ──── -->
+<div id="transfer-drop-modal" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <h3 id="transfer-drop-modal-title">Choose who to drop</h3>
+    <div id="transfer-drop-modal-roster"></div>
+    <button type="button" class="action-btn" onclick="closeTransferDropModal()">Cancel</button>
+  </div>
+</div>
+
+<!-- ── Datalists for autocomplete on player-name / club fields ────────────── -->
+<datalist id="all-players-datalist">
+  {% for name in all_player_names %}<option value="{{ name }}"></option>{% endfor %}
+</datalist>
+<datalist id="current-clubs-datalist">
+  {% for club in current_pl_clubs %}<option value="{{ club }}"></option>{% endfor %}
+</datalist>
+
+<!-- ── Transfer draft: add-new-player form modal ──────────────────────────── -->
+<div id="transfer-newplayer-modal" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <h3>Add a brand-new player</h3>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:14px">
+      <input type="text" id="np-name" class="player-search-input" placeholder="Player name" />
+      <input type="text" id="np-club" class="player-search-input" placeholder="Club" list="current-clubs-datalist" />
+      <select id="np-position" class="gw-jump-select" onchange="syncPositionEligibility()">
+        <option value="">Primary position…</option>
+        <option value="GK">GK</option>
+        <option value="DEF">DEF</option>
+        <option value="MID">MID</option>
+        <option value="FW">FW</option>
+      </select>
+      <div>
+        <div class="gw-jump-label" style="margin-bottom:6px">Eligible positions (all that apply)</div>
+        <div style="display:flex;gap:10px">
+          {% for pos in ['GK', 'DEF', 'MID', 'FW'] %}
+          <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer">
+            <input type="checkbox" class="np-eligibility-checkbox" value="{{ pos }}" /> {{ pos }}
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    <div id="np-error" style="display:none;color:var(--pl-magenta);font-size:13px;margin-bottom:10px"></div>
+    <div style="display:flex;gap:8px">
+      <button type="button" class="primary-btn" onclick="confirmAddNewPlayer()">Add to Pool</button>
+      <button type="button" class="action-btn" onclick="closeAddNewPlayerModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/game_log.js') }}"></script>
+<script src="{{ url_for('static', filename='js/roster_picker.js') }}"></script>
+<script>
+const DRAFT_STATUS = "{{ state.status }}";
+const POSITION_TARGETS = {{ position_targets|tojson }};
+const MANAGERS = {{ managers|tojson }};
+const CURRENT_GW = {{ current_gw }};
+const STAT_COLS = {{ stat_cols|tojson }};
+const ALL_PLAYER_NAMES = {{ all_player_names|tojson }};
+const CURRENT_PL_CLUBS = {{ current_pl_clubs|tojson }};
+const CLUB_BADGES = {{ badges|tojson }};
+
+// ── Randomizer ───────────────────────────────────────────────────────────
+async function spin() {
+  const btn = document.getElementById('spin-btn');
+  const display = document.getElementById('randomizer-display');
+  btn.disabled = true;
+
+  const names = MANAGERS.map(m => m.name);
+  let ticks = 0;
+  const shuffleInterval = setInterval(() => {
+    const shuffled = [...names].sort(() => Math.random() - 0.5);
+    display.innerHTML = shuffled.map(n => `<span class="randomizer-chip">${n}</span>`).join('');
+    ticks++;
+  }, 120);
+
+  const res = await fetch('/api/draft/spin', { method: 'POST' });
+  const data = await res.json();
+
+  setTimeout(() => {
+    clearInterval(shuffleInterval);
+    if (!res.ok) {
+      alert(data.error || 'Spin failed');
+      window.location.reload();
+      return;
+    }
+    display.innerHTML = data.order.map((m, i) =>
+      `<span class="randomizer-chip">${i + 1}. ${m.name}</span>`
+    ).join('');
+    setTimeout(() => window.location.reload(), 1200);
+  }, 1400);
+}
+
+async function startDraft() {
+  const res = await fetch('/api/draft/start', { method: 'POST' });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Could not start draft'); return; }
+  window.location.reload();
+}
+
+async function resetDraft() {
+  if (!confirm('Reset the entire draft? This wipes all picks and rosters.')) return;
+  const res = await fetch('/api/draft/reset', { method: 'POST' });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Reset failed'); return; }
+  window.location.reload();
+}
+
+async function lockDraft() {
+  if (!confirm('Lock the draft? Nobody will be able to make further picks or rearrange rosters until it is unlocked.')) return;
+  const res = await fetch('/api/draft/lock', { method: 'POST' });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Lock failed'); return; }
+  window.location.reload();
+}
+
+async function unlockDraft() {
+  if (!confirm('Unlock the draft?')) return;
+  const res = await fetch('/api/draft/unlock', { method: 'POST' });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Unlock failed'); return; }
+  window.location.reload();
+}
+
+// ── Filters ──────────────────────────────────────────────────────────────
+function applyFilters() {
+  const q = document.getElementById('player-search').value.toLowerCase();
+  const wantedPositions = Array.from(document.querySelectorAll('.position-checkbox:checked')).map(cb => cb.value);
+  const hideDrafted = document.getElementById('hide-drafted-checkbox').checked;
+  const viewAsId = document.getElementById('view-as-select').value;
+  document.querySelectorAll('#pool-table tbody tr.pool-row').forEach(row => {
+    const owner = row.getAttribute('data-owner');
+    const nameMatch = row.getAttribute('data-player').includes(q);
+    const eligibility = row.getAttribute('data-eligibility').split(',');
+    const posMatch = wantedPositions.every(pos => eligibility.includes(pos));
+    const draftedMatch = !hideDrafted || !owner;
+    const viewAsMatch = !viewAsId || !owner || owner === viewAsId;
+    const match = nameMatch && posMatch && draftedMatch && viewAsMatch;
+    row.style.display = match ? '' : 'none';
+    row.classList.toggle('pool-row-mine', !!(viewAsId && owner === viewAsId));
+    const hist = row.nextElementSibling;
+    if (hist && !match) hist.style.display = 'none';
+  });
+}
+
+// ── Sorting (keeps each pool row paired with its history row) ────────────
+let poolSortState = {};
+function sortPool(colIndex, forceDir) {
+  const table = document.getElementById('pool-table');
+  const tbody = table.querySelector('tbody');
+  const th = table.querySelectorAll('th')[colIndex];
+  const isNum = th.getAttribute('data-type') === 'num';
+
+  const asc = forceDir ? forceDir === 'asc' : poolSortState[colIndex] !== 'asc';
+  poolSortState = { [colIndex]: asc ? 'asc' : 'desc' };
+
+  const pairs = Array.from(tbody.querySelectorAll('tr.pool-row')).map(row => [row, row.nextElementSibling]);
+
+  pairs.sort((a, b) => {
+    const aCell = a[0].children[colIndex];
+    const bCell = b[0].children[colIndex];
+    let aVal, bVal;
+    if (isNum) {
+      aVal = parseFloat(aCell.textContent) || 0;
+      bVal = parseFloat(bCell.textContent) || 0;
+    } else {
+      aVal = aCell.textContent.trim().toLowerCase();
+      bVal = bCell.textContent.trim().toLowerCase();
+    }
+    if (aVal < bVal) return asc ? -1 : 1;
+    if (aVal > bVal) return asc ? 1 : -1;
+    return 0;
+  });
+
+  pairs.forEach(([row, hist]) => {
+    tbody.appendChild(row);
+    if (hist) tbody.appendChild(hist);
+  });
+
+  table.querySelectorAll('th').forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
+  th.classList.add(asc ? 'sort-asc' : 'sort-desc');
+}
+
+// ── Per-player game log expander ─────────────────────────────────────────
+async function togglePoolHistory(name) {
+  for (const row of document.querySelectorAll('.pool-history-row')) {
+    if (row.getAttribute('data-name') !== name) continue;
+    if (row.style.display === 'none') {
+      row.style.display = '';
+      const panel = row.querySelector('.player-history-panel');
+      await loadPlayerHistory(name, panel, false);
+    } else {
+      row.style.display = 'none';
+    }
+  }
+}
+
+// ── Draft pick flow ──────────────────────────────────────────────────────
+let pendingAction = null;  // {type: 'player', name} | {type: 'token'}
+
+function startDraftPick(playerName) {
+  const managerId = document.getElementById('as-manager-select').value;
+  if (!managerId) { alert('Select who you are picking as first.'); return; }
+  pendingAction = { type: 'player', name: playerName };
+  const managerName = MANAGERS.find(m => m.id == managerId).name;
+  document.getElementById('confirm-modal-title').textContent = `Draft ${playerName}?`;
+  document.getElementById('confirm-modal-body').textContent = `${managerName} will select ${playerName} with this pick.`;
+  document.getElementById('confirm-modal').style.display = 'flex';
+}
+
+function startTokenClaim() {
+  const managerId = document.getElementById('as-manager-select').value;
+  if (!managerId) { alert('Select who you are picking as first.'); return; }
+  pendingAction = { type: 'token' };
+  const managerName = MANAGERS.find(m => m.id == managerId).name;
+  document.getElementById('confirm-modal-title').textContent = 'Claim Summer Transfer Token?';
+  document.getElementById('confirm-modal-body').textContent =
+    `${managerName} will spend this pick on a Summer Transfer token instead of a player. ` +
+    `Token numbers are assigned in claim order — the next available number goes to you.`;
+  document.getElementById('confirm-modal').style.display = 'flex';
+}
+
+function closeConfirmModal() {
+  pendingAction = null;
+  document.getElementById('confirm-modal').style.display = 'none';
+}
+
+async function confirmDraftPick() {
+  const managerId = document.getElementById('as-manager-select').value;
+  const action = pendingAction;
+  const url = action.type === 'token' ? '/api/draft/claim_token' : '/api/draft/pick';
+  const body = { manager_id: parseInt(managerId) };
+  if (action.type === 'player') body.player_name = action.name;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  closeConfirmModal();
+  if (!res.ok) { alert(data.error || 'Pick failed'); return; }
+  refreshDraftState();
+}
+
+// ── Live polling ──────────────────────────────────────────────────────────
+async function refreshDraftState() {
+  if (!['in_progress', 'complete', 'locked'].includes(DRAFT_STATUS)) return;
+  const res = await fetch('/api/draft/state');
+  const data = await res.json();
+
+  if (data.status === 'complete' && DRAFT_STATUS === 'in_progress') {
+    window.location.reload();
+    return;
+  }
+
+  const pickProgressEl = document.getElementById('pick-progress');
+  if (pickProgressEl) pickProgressEl.textContent = `Pick ${data.current_pick_number} of ${data.total_picks}`;
+  const onClockEl = document.getElementById('on-the-clock');
+  if (onClockEl && data.on_the_clock) {
+    const m = MANAGERS.find(mg => mg.id === data.on_the_clock.manager_id);
+    let clockText = `Round ${data.on_the_clock.round}, Pick ${data.on_the_clock.pick_in_round} — On the clock: ${m ? m.name : '?'}`;
+    if (data.on_the_clock.must_claim_token) {
+      clockText += ' — ⚡ roster full: this pick must be their Summer Transfer token';
+    }
+    onClockEl.textContent = clockText;
+  }
+
+  const draftedNames = new Set(data.picks.map(p => p.player_name));
+  document.querySelectorAll('.pool-row').forEach(row => {
+    const name = row.getAttribute('data-name');
+    if (!draftedNames.has(name)) return;
+    const pick = data.picks.find(p => p.player_name === name);
+    row.querySelector('.pool-status-cell').innerHTML =
+      `<span style="color:var(--pl-magenta)">Drafted — ${pick.manager_name}</span>`;
+    row.querySelector('.pool-action-cell').innerHTML = '';
+  });
+
+  MANAGERS.forEach(m => {
+    const roster = data.rosters_by_manager[m.id] || [];
+    renderTeamCard(m.id, roster, data.tokens_by_manager[m.id]);
+  });
+
+  // Snake matrix: fill picked cells, highlight whoever is on the clock
+  data.picks.forEach(p => {
+    const cell = document.getElementById(`snake-cell-${p.overall_pick}`);
+    if (cell) {
+      cell.classList.add('snake-cell-picked');
+      cell.querySelector('.snake-pick-player').textContent = p.player_name;
+    }
+  });
+  document.querySelectorAll('.snake-cell-current').forEach(c => c.classList.remove('snake-cell-current'));
+  const curCell = document.getElementById(`snake-cell-${data.current_pick_number}`);
+  if (curCell) curCell.classList.add('snake-cell-current');
+
+  if (DRAFT_STATUS === 'in_progress') setTimeout(refreshDraftState, 3000);
+}
+
+function renderTeamCard(managerId, roster, tokenNumber) {
+  const eligDiv = document.getElementById(`draft-elig-${managerId}`);
+  const rosterDiv = document.getElementById(`draft-roster-${managerId}`);
+  if (!eligDiv || !rosterDiv) return;
+
+  const starters = roster.filter(r => r.slot_type === 'starter');
+  const benchCount = roster.filter(r => r.slot_type === 'bench').length;
+  const counts = { FW: 0, MID: 0, DEF: 0, GK: 0 };
+  starters.forEach(r => { if (counts.hasOwnProperty(r.position_slot)) counts[r.position_slot]++; });
+  eligDiv.innerHTML = Object.keys(POSITION_TARGETS).map(pos =>
+    `<span class="formation-item ${counts[pos] === POSITION_TARGETS[pos] ? 'formation-ok' : ''}">${pos}: <strong>${counts[pos]}</strong>/${POSITION_TARGETS[pos]}</span>`
+  ).join('') +
+    `<span class="formation-item ${benchCount === 4 ? 'formation-ok' : ''}">Bench: <strong>${benchCount}</strong>/4</span>` +
+    `<span class="formation-item ${tokenNumber ? 'formation-ok' : ''}">${tokenNumber ? `⚡ ST #${tokenNumber}` : '⚡ ST: —'}</span>`;
+
+  const order = { FW: 0, MID: 1, DEF: 2, GK: 3, bench: 4 };
+  const sorted = [...roster].sort((a, b) => (order[a.position_slot] ?? 5) - (order[b.position_slot] ?? 5));
+  rosterDiv.innerHTML = sorted.map(r => {
+    const badgeUrl = CLUB_BADGES[r.club];
+    const badgeImg = badgeUrl ? `<img class="club-badge club-badge-sm" src="${badgeUrl}" alt="${r.club}" title="${r.club}">` : '';
+    const eligBadges = (r.eligibility || []).map(pos => `<span class="pos-badge pos-badge-sm">${pos}</span>`).join('');
+    return `<div class="draft-roster-row">${badgeImg}<span class="pos-badge">${r.position_slot || '—'}</span> ${r.player_name} ${eligBadges}</div>`;
+  }).join('') || '<div class="empty-state" style="padding:8px">No picks yet</div>';
+}
+
+// ── Draft page tabs (Main Draft / Summer Transfer / Winter Transfer) ─────
+const DRAFT_TABS = ['maindraft', 'summer', 'winter'];
+function showDraftTab(name) {
+  DRAFT_TABS.forEach(t => {
+    document.getElementById(`tab-${t}`).style.display = t === name ? '' : 'none';
+    document.getElementById(`tab-btn-${t}`).classList.toggle('active', t === name);
+  });
+  localStorage.setItem('draftActiveTab', name);
+  if (name === 'summer' || name === 'winter') renderTransferDraft(name);
+}
+
+// ── Summer/Winter Transfer Draft ─────────────────────────────────────────
+const TRANSFER_LABELS = { summer: 'Summer', winter: 'Winter' };
+
+async function renderTransferDraft(type) {
+  const root = document.getElementById(`transfer-${type}-root`);
+  root.innerHTML = 'Loading...';
+  const res = await fetch(`/api/transfer/${type}/state`);
+  const data = await res.json();
+  const label = TRANSFER_LABELS[type];
+
+  if (data.status === 'not_started') {
+    root.innerHTML = renderTransferNotStarted(type, label, data.pool);
+  } else if (data.status === 'in_progress') {
+    root.innerHTML = renderTransferInProgress(type, label, data);
+    sortTransferPool(type, 4, 'desc');
+  } else {
+    root.innerHTML = renderTransferComplete(type, label, data.picks, data.order_round1);
+  }
+}
+
+function clubCellHtml(p) {
+  return p.previous_club
+    ? `${p.club} <span style="color:var(--text-muted);font-size:11px">(was ${p.previous_club})</span>`
+    : p.club;
+}
+
+function renderTransferNotStarted(type, label, pool) {
+  const rows = pool.map(p => `
+    <tr>
+      <td style="text-align:left">${p.name}</td>
+      <td style="text-align:left">${clubCellHtml(p)}</td>
+      <td>${p.position}</td>
+      <td><button type="button" class="action-btn" onclick="removeFromPool('${type}', '${p.name.replace(/'/g, "\\'")}')">Remove</button></td>
+    </tr>`).join('') || '<tr><td colspan="4" style="color:var(--text-muted)">No players in the pool yet.</td></tr>';
+
+  return `
+    <div class="table-wrap" style="padding:20px">
+      <h3 style="margin-top:0">${label} Transfer Pool</h3>
+      <p style="color:var(--text-secondary)">Curate the players who transferred in this window. Round 1 of the draft only offers players from this pool.</p>
+      <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:flex-end">
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <label class="gw-jump-label">Existing player name</label>
+          <input type="text" id="transfer-${type}-add-input" class="player-search-input" placeholder="e.g. Elliot Anderson" list="all-players-datalist" style="min-width:200px" />
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <label class="gw-jump-label">New club (only if transferred)</label>
+          <input type="text" id="transfer-${type}-club-input" class="player-search-input" placeholder="e.g. Manchester City" list="current-clubs-datalist" style="min-width:200px" />
+        </div>
+        <button type="button" class="action-btn" onclick="addExistingToPool('${type}')">Add to Pool</button>
+        <button type="button" class="action-btn" onclick="openAddNewPlayerModal('${type}')">+ Add Brand-New Player</button>
+      </div>
+      <div id="transfer-${type}-add-error" style="display:none;color:var(--pl-magenta);font-size:13px;margin-bottom:10px"></div>
+      <table class="data-table">
+        <thead><tr><th style="text-align:left">Player</th><th style="text-align:left">Club</th><th>Position</th><th>Remove</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div style="margin-top:14px">
+        <button type="button" class="primary-btn" onclick="startTransferDraft('${type}')" ${pool.length === 0 ? 'disabled' : ''}>🏁 Start ${label} Transfer Draft</button>
+      </div>
+    </div>`;
+}
+
+const TRANSFER_ROUND_ORDER_DESC = {
+  summer: {
+    1: 'Order managers claimed their Summer Transfer Token in the Main Draft',
+    2: 'Current Waiver Wire order',
+  },
+  winter: {
+    1: 'Reverse season standings — worst record picks first, ties broken by fewest points',
+    2: 'Current Waiver Wire order',
+  },
+};
+
+function renderTransferMatrix(type, orderRound1, picks, currentRound, currentManagerId) {
+  const cols = orderRound1;
+  const headerCells = cols.map(m => `
+    <th>
+      <div class="snake-col-header">
+        <div class="team-avatar team-avatar-sm team-avatar-placeholder">${m.name[0].toUpperCase()}</div>
+        <span>${m.name}</span>
+      </div>
+    </th>`).join('');
+
+  const rowHtml = (round, arrow) => {
+    const cells = cols.map(m => {
+      const pick = picks.find(p => p.round === round && p.manager_id === m.manager_id);
+      const isCurrent = round === currentRound && m.manager_id === currentManagerId;
+      const classes = ['snake-cell'];
+      if (pick) classes.push('snake-cell-picked');
+      if (isCurrent) classes.push('snake-cell-current');
+      const content = pick
+        ? (pick.is_pass ? '<span class="snake-pick-player">Passed</span>' : `<span class="snake-pick-player">${pick.player_name}</span>`)
+        : '';
+      return `<td class="${classes.join(' ')}">${content}</td>`;
+    }).join('');
+    return `<tr><td class="snake-round-label">R${round} ${arrow}</td>${cells}</tr>`;
+  };
+
+  const desc = TRANSFER_ROUND_ORDER_DESC[type] || {};
+  const dividerRow = `<tr><td colspan="${cols.length + 1}" class="transfer-matrix-divider">Round 2 uses a different order — see above</td></tr>`;
+
+  return `
+    <div class="table-wrap" style="padding:16px 20px;margin-bottom:14px">
+      <h3 style="margin-top:0;margin-bottom:4px">📋 Pick Matrix</h3>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;display:flex;flex-direction:column;gap:2px">
+        <span><strong>Round 1 order:</strong> ${desc[1] || '—'}</span>
+        <span><strong>Round 2 order:</strong> ${desc[2] || '—'}</span>
+      </div>
+      <div class="snake-matrix-wrap">
+        <table class="snake-matrix">
+          <thead><tr><th class="snake-round-label"></th>${headerCells}</tr></thead>
+          <tbody>${rowHtml(1, '→')}${dividerRow}${rowHtml(2, '→')}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function renderTransferInProgress(type, label, data) {
+  const order = data.round === 1 ? data.order_round1 : data.order_round2;
+  const onClock = order.find(o => o.position === data.current_pick_number);
+  const onClockName = onClock ? `${onClock.name} — ${onClock.team_name}` : '—';
+  const onClockId = onClock ? onClock.manager_id : null;
+
+  const statHeaders = STAT_COLS.map(([key, label, title], i) =>
+    `<th class="sortable" data-type="num" onclick="sortTransferPool('${type}', ${8 + i})" title="2025-26 total ${title}">${label}</th>`
+  ).join('');
+
+  const poolRows = data.current_pool.map(p => {
+    const statCells = STAT_COLS.map(([key]) => `<td>${p.stats[key] || 0}</td>`).join('');
+    return `
+      <tr>
+        <td class="pool-action-cell pool-sticky-col pool-sticky-0">
+          <button type="button" class="action-btn" onclick="startTransferPick('${type}', '${p.name.replace(/'/g, "\\'")}', ${onClockId})">Pick</button>
+        </td>
+        <td style="text-align:left;font-weight:600" class="pool-sticky-col pool-sticky-1">${p.name}</td>
+        <td style="text-align:left" class="pool-sticky-col pool-sticky-2">${clubCellHtml(p)}</td>
+        <td style="text-align:left" class="pool-sticky-col pool-sticky-3">${p.eligibility.map(pos => `<span class="pos-badge">${pos}</span>`).join('')}</td>
+        <td>${p.pts_2025_26.toFixed(2)}</td>
+        <td>${p.avg_2025_26.toFixed(2)}</td>
+        <td>${p.proj_total != null ? p.proj_total.toFixed(2) : '—'}</td>
+        <td>${p.proj_avg != null ? p.proj_avg.toFixed(2) : '—'}</td>
+        ${statCells}
+      </tr>`;
+  }).join('') || `<tr><td colspan="${8 + STAT_COLS.length}" style="color:var(--text-muted)">No players available this round.</td></tr>`;
+
+  return `
+    <div class="table-wrap" style="padding:16px 20px;margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <strong>Round ${data.round} of 2</strong>
+      <span>On the clock: <strong>${onClockName}</strong></span>
+      ${onClockId ? `<button type="button" class="action-btn" onclick="passTransferPick('${type}', ${onClockId})">Pass</button>` : ''}
+    </div>
+    ${renderTransferMatrix(type, data.order_round1, data.picks, data.round, onClockId)}
+    <div class="table-wrap pool-table-wrap">
+      <table class="data-table pool-table-sticky" id="transfer-${type}-pool-table">
+        <thead>
+          <tr>
+            <th class="pool-sticky-col pool-sticky-0">Pick</th>
+            <th class="sortable pool-sticky-col pool-sticky-1" style="text-align:left" onclick="sortTransferPool('${type}', 1)">Player</th>
+            <th class="sortable pool-sticky-col pool-sticky-2" style="text-align:left" onclick="sortTransferPool('${type}', 2)">Club</th>
+            <th class="pool-sticky-col pool-sticky-3" style="text-align:left">Eligible</th>
+            <th class="sortable" data-type="num" onclick="sortTransferPool('${type}', 4)">2025–26 FPts</th>
+            <th class="sortable" data-type="num" onclick="sortTransferPool('${type}', 5)">2025–26 Avg</th>
+            <th class="sortable" data-type="num" onclick="sortTransferPool('${type}', 6)" title="2026-27 projected total points">Proj FPts</th>
+            <th class="sortable" data-type="num" onclick="sortTransferPool('${type}', 7)" title="2026-27 projected average points">Proj Avg</th>
+            ${statHeaders}
+          </tr>
+        </thead>
+        <tbody>${poolRows}</tbody>
+      </table>
+    </div>`;
+}
+
+const transferSortState = {};
+function sortTransferPool(type, colIndex, forceDir) {
+  const table = document.getElementById(`transfer-${type}-pool-table`);
+  if (!table) return;
+  const tbody = table.querySelector('tbody');
+  const th = table.querySelectorAll('th')[colIndex];
+  const isNum = th.getAttribute('data-type') === 'num';
+  const key = `${type}-${colIndex}`;
+  const asc = forceDir ? forceDir === 'asc' : transferSortState[key] !== 'asc';
+  transferSortState[key] = asc ? 'asc' : 'desc';
+
+  const rows = Array.from(tbody.querySelectorAll('tr'));
+  rows.sort((a, b) => {
+    const aCell = a.children[colIndex];
+    const bCell = b.children[colIndex];
+    if (!aCell || !bCell) return 0;
+    let aVal, bVal;
+    if (isNum) {
+      aVal = parseFloat(aCell.textContent) || 0;
+      bVal = parseFloat(bCell.textContent) || 0;
+    } else {
+      aVal = aCell.textContent.trim().toLowerCase();
+      bVal = bCell.textContent.trim().toLowerCase();
+    }
+    if (aVal < bVal) return asc ? -1 : 1;
+    if (aVal > bVal) return asc ? 1 : -1;
+    return 0;
+  });
+  rows.forEach(r => tbody.appendChild(r));
+  table.querySelectorAll('th').forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
+  th.classList.add(asc ? 'sort-asc' : 'sort-desc');
+}
+
+function renderTransferComplete(type, label, picks, orderRound1) {
+  const roundBlock = (round) => {
+    const rows = picks.filter(p => p.round === round).map(p => `
+      <tr>
+        <td>${p.overall_pick}</td>
+        <td style="text-align:left">${p.manager_name} — ${p.team_name}</td>
+        <td style="text-align:left">${p.is_pass ? 'Passed' : `+ ${p.player_name} <span style="color:var(--text-muted)">(dropped ${p.dropped_player})</span>`}</td>
+      </tr>`).join('') || '<tr><td colspan="3" style="color:var(--text-muted)">No picks recorded.</td></tr>';
+    return `<h4>Round ${round}</h4><table class="data-table"><thead><tr><th>#</th><th style="text-align:left">Manager</th><th style="text-align:left">Result</th></tr></thead><tbody>${rows}</tbody></table>`;
+  };
+  return `<div class="table-wrap" style="padding:20px"><h3 style="margin-top:0">🏁 ${label} Transfer Draft — Complete</h3>${roundBlock(1)}<div style="margin-top:18px">${roundBlock(2)}</div></div>${renderTransferMatrix(type, orderRound1, picks, null, null)}`;
+}
+
+async function addExistingToPool(type) {
+  const input = document.getElementById(`transfer-${type}-add-input`);
+  const clubInput = document.getElementById(`transfer-${type}-club-input`);
+  const errElId = `transfer-${type}-add-error`;
+  hideFieldError(errElId);
+  const name = input.value.trim();
+  const newClub = clubInput.value.trim();
+  if (!name) return;
+  if (!ALL_PLAYER_NAMES.includes(name)) {
+    showFieldError(errElId, `"${name}" doesn't match a player in the database. Pick one from the suggestions as you type.`);
+    return;
+  }
+  if (newClub && !CURRENT_PL_CLUBS.includes(newClub)) {
+    showFieldError(errElId, `"${newClub}" isn't a current Premier League club. Pick one from the suggestions as you type.`);
+    return;
+  }
+  const res = await fetch(`/api/transfer/${type}/pool/add`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ player_name: name, new_club: newClub, added_by: 'commissioner' })
+  });
+  const data = await res.json();
+  if (!res.ok) { showFieldError(errElId, data.error || 'Add failed'); return; }
+  input.value = '';
+  clubInput.value = '';
+  renderTransferDraft(type);
+}
+
+async function removeFromPool(type, name) {
+  const res = await fetch(`/api/transfer/${type}/pool/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Remove failed'); return; }
+  renderTransferDraft(type);
+}
+
+let pendingNewPlayerType = null;
+function openAddNewPlayerModal(type) {
+  pendingNewPlayerType = type;
+  document.getElementById('np-name').value = '';
+  document.getElementById('np-club').value = '';
+  document.getElementById('np-position').value = '';
+  document.querySelectorAll('.np-eligibility-checkbox').forEach(cb => { cb.checked = false; cb.disabled = false; });
+  hideFieldError('np-error');
+  document.getElementById('transfer-newplayer-modal').style.display = 'flex';
+}
+function showFieldError(elId, message) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.textContent = message;
+  el.style.display = 'block';
+}
+function hideFieldError(elId) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.style.display = 'none';
+}
+function closeAddNewPlayerModal() {
+  document.getElementById('transfer-newplayer-modal').style.display = 'none';
+}
+function syncPositionEligibility() {
+  const position = document.getElementById('np-position').value;
+  document.querySelectorAll('.np-eligibility-checkbox').forEach(cb => {
+    if (cb.value === position) { cb.checked = true; cb.disabled = true; }
+    else { cb.disabled = false; }
+  });
+}
+
+async function confirmAddNewPlayer() {
+  hideFieldError('np-error');
+  const name = document.getElementById('np-name').value.trim();
+  const club = document.getElementById('np-club').value.trim();
+  const position = document.getElementById('np-position').value;
+  const eligibility = Array.from(document.querySelectorAll('.np-eligibility-checkbox:checked')).map(cb => cb.value);
+  if (!name || !club || !position) { showFieldError('np-error', 'Name, club, and position are required.'); return; }
+  if (!CURRENT_PL_CLUBS.includes(club)) {
+    showFieldError('np-error', `"${club}" isn't a current Premier League club. Pick one from the suggestions as you type.`);
+    return;
+  }
+  const res = await fetch(`/api/transfer/${pendingNewPlayerType}/pool/add-new`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ player_name: name, club, position, eligibility, added_by: 'commissioner' })
+  });
+  const data = await res.json();
+  if (!res.ok) { showFieldError('np-error', data.error || 'Add failed'); return; }
+  closeAddNewPlayerModal();
+  renderTransferDraft(pendingNewPlayerType);
+}
+
+async function startTransferDraft(type) {
+  if (!confirm(`Start the ${TRANSFER_LABELS[type]} Transfer Draft? The pool can't be edited after this.`)) return;
+  const res = await fetch(`/api/transfer/${type}/start`, { method: 'POST' });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Start failed'); return; }
+  renderTransferDraft(type);
+}
+
+let pendingTransferType = null;
+let pendingTransferPlayer = null;
+let pendingTransferManagerId = null;
+
+function startTransferPick(type, playerName, managerId) {
+  pendingTransferType = type;
+  pendingTransferPlayer = playerName;
+  pendingTransferManagerId = managerId;
+  document.getElementById('transfer-drop-modal-title').textContent = `Picking ${playerName} — drop who?`;
+  const rosterDiv = document.getElementById('transfer-drop-modal-roster');
+  rosterDiv.innerHTML = 'Loading roster...';
+  document.getElementById('transfer-drop-modal').style.display = 'flex';
+  fetch(`/api/manager/${managerId}/roster`).then(r => r.json()).then(roster => {
+    rosterDiv.innerHTML = renderRosterPicker(roster, 'confirmTransferPick');
+  });
+}
+
+function closeTransferDropModal() {
+  document.getElementById('transfer-drop-modal').style.display = 'none';
+}
+
+async function confirmTransferPick(dropPlayer) {
+  const res = await fetch(`/api/transfer/${pendingTransferType}/pick`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      manager_id: pendingTransferManagerId,
+      player_name: pendingTransferPlayer,
+      dropped_player: dropPlayer,
+      gw: CURRENT_GW,
+    })
+  });
+  const data = await res.json();
+  closeTransferDropModal();
+  if (!res.ok) { alert(data.error || 'Pick failed'); return; }
+  renderTransferDraft(pendingTransferType);
+}
+
+async function passTransferPick(type, managerId) {
+  if (!confirm('Pass this turn?')) return;
+  const res = await fetch(`/api/transfer/${type}/pass`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ manager_id: managerId })
+  });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Pass failed'); return; }
+  renderTransferDraft(type);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  refreshDraftState();
+  if (document.getElementById('pool-table')) sortPool(5, 'desc');
+  const savedTab = localStorage.getItem('draftActiveTab');
+  showDraftTab(DRAFT_TABS.includes(savedTab) ? savedTab : 'maindraft');
+});
+</script>
+{% endblock %}

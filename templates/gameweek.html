@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}Gameweek {{ gw }} · Fútbol de Fantasía{% endblock %}
+
+{% block content %}
+
+<!-- ── GW Header + Nav ───────────────────────────────────────────────────── -->
+<section class="section">
+  <div class="gw-header">
+    <div class="gw-nav">
+      {% if prev_gw %}
+        <a href="/gameweek/{{ prev_gw }}" class="gw-arrow">‹</a>
+      {% else %}
+        <span class="gw-arrow disabled">‹</span>
+      {% endif %}
+
+      <div class="gw-title-block">
+        <h2 class="gw-title">Gameweek {{ gw }}</h2>
+        <span class="season-badge">{{ season }}</span>
+      </div>
+
+      {% if next_gw %}
+        <a href="/gameweek/{{ next_gw }}" class="gw-arrow">›</a>
+      {% else %}
+        <span class="gw-arrow disabled">›</span>
+      {% endif %}
+
+      <!-- GW Jump Selector -->
+      <div class="gw-jump">
+        <label class="gw-jump-label">Jump to:</label>
+        <select class="gw-jump-select" onchange="jumpToGW(this.value)">
+          {% for g in range(1, 34) %}
+          <option value="{{ g }}" {% if g == gw %}selected{% endif %}>GW{{ g }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <!-- Scrape button -->
+    <button class="scrape-btn" id="scrapeBtn" onclick="triggerScrape({{ gw }})">
+      🔄 Press the Button
+    </button>
+  </div>
+</section>
+
+<!-- ── Button-press fun overlay ─────────────────────────────────────────── -->
+<div id="buttonFunOverlay" class="button-fun-overlay" style="display:none">
+  <div id="confettiLayer" class="confetti-layer"></div>
+  <img id="buttonFunGif" class="button-fun-gif" src="" alt="" />
+</div>
+
+<!-- ── Matchup Cards ─────────────────────────────────────────────────────── -->
+<section class="section">
+  <h3 class="section-title">🏟️ Matchups</h3>
+  <div class="matchup-grid">
+    {% for m in matchups %}
+    <div class="matchup-card">
+
+      <!-- Team A -->
+      <div class="matchup-side {% if m.score_a is not none and m.score_b is not none %}{% if m.win_a %}side-win{% elif m.loss_a %}side-loss{% else %}side-tie{% endif %}{% endif %}">
+        <div class="matchup-identity">
+          {% if m.team_a_photo %}
+          <img src="{{ url_for('static', filename=m.team_a_photo) }}" class="team-avatar team-avatar-md" />
+          {% else %}
+          <div class="team-avatar team-avatar-md team-avatar-placeholder">{{ m.team_a_name[0]|upper }}</div>
+          {% endif %}
+          <div class="matchup-identity-text">
+            <span class="matchup-manager">{{ m.team_a_name }}</span>
+            <span class="matchup-team">{{ m.team_a_team }}</span>
+          </div>
+        </div>
+        <span class="matchup-score">
+          {% if m.score_a is not none %}{{ "%.2f"|format(m.score_a) }}{% else %}—{% endif %}
+        </span>
+        {% if m.score_a is not none %}
+          {% if m.win_a %}<span class="matchup-badge badge-win">W</span>
+          {% elif m.loss_a %}<span class="matchup-badge badge-loss">L</span>
+          {% else %}<span class="matchup-badge badge-tie">T</span>{% endif %}
+        {% endif %}
+      </div>
+
+      <div class="matchup-vs">VS</div>
+
+      <!-- Team B -->
+      <div class="matchup-side {% if m.score_a is not none and m.score_b is not none %}{% if m.win_b %}side-win{% elif m.loss_b %}side-loss{% else %}side-tie{% endif %}{% endif %}">
+        <div class="matchup-identity">
+          {% if m.team_b_photo %}
+          <img src="{{ url_for('static', filename=m.team_b_photo) }}" class="team-avatar team-avatar-md" />
+          {% else %}
+          <div class="team-avatar team-avatar-md team-avatar-placeholder">{{ m.team_b_name[0]|upper }}</div>
+          {% endif %}
+          <div class="matchup-identity-text">
+            <span class="matchup-manager">{{ m.team_b_name }}</span>
+            <span class="matchup-team">{{ m.team_b_team }}</span>
+          </div>
+        </div>
+        <span class="matchup-score">
+          {% if m.score_b is not none %}{{ "%.2f"|format(m.score_b) }}{% else %}—{% endif %}
+        </span>
+        {% if m.score_b is not none %}
+          {% if m.win_b %}<span class="matchup-badge badge-win">W</span>
+          {% elif m.loss_b %}<span class="matchup-badge badge-loss">L</span>
+          {% else %}<span class="matchup-badge badge-tie">T</span>{% endif %}
+        {% endif %}
+      </div>
+
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<!-- ── PL Fixtures this GW ──────────────────────────────────────────────── -->
+<section class="section">
+  <h3 class="section-title">📋 Premier League Fixtures — GW{{ gw }}</h3>
+  <div class="table-wrap">
+    <table class="data-table fixtures-table">
+      <thead>
+        <tr>
+          <th style="text-align:left">Home</th>
+          <th></th>
+          <th style="text-align:right">Away</th>
+          <th style="text-align:right">Kickoff</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for group in day_groups %}
+          {% if group.label %}
+          <tr class="fixture-day-row"><td colspan="4" class="fixture-day-label">{{ group.label }}</td></tr>
+          {% endif %}
+          {% for f in group.matches %}
+          <tr>
+            <td class="fixture-team fixture-home">
+              <span class="fixture-team-inner">
+                {% if badges.get(f.home_club) %}
+                  <img src="{{ badges[f.home_club] }}" alt="{{ f.home_club }}" class="club-badge" />
+                {% endif %}
+                {{ f.home_club }}
+              </span>
+            </td>
+            <td class="fixture-vs">vs</td>
+            <td class="fixture-team fixture-away">
+              <span class="fixture-team-inner">
+                {{ f.away_club }}
+                {% if badges.get(f.away_club) %}
+                  <img src="{{ badges[f.away_club] }}" alt="{{ f.away_club }}" class="club-badge" />
+                {% endif %}
+              </span>
+            </td>
+            <td class="fixture-kickoff" style="text-align:right">{{ f.time or '—' }}</td>
+          </tr>
+          {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<script>
+function jumpToGW(gw) {
+  if (gw) window.location.href = '/gameweek/' + gw;
+}
+
+const BUTTON_FUN_GIFS = [
+  'https://media.tenor.com/SbjrY1_nq50AAAAM/peter-griffin-push.gif',
+  'https://media.tenor.com/qh12C5P2E3oAAAAM/pushing-buttons.gif',
+];
+const CONFETTI_EMOJI = ['⚽', '🎉', '🔥', '✨'];
+
+function showButtonFun() {
+  const overlay = document.getElementById('buttonFunOverlay');
+  const confettiLayer = document.getElementById('confettiLayer');
+  const gifEl = document.getElementById('buttonFunGif');
+
+  gifEl.src = BUTTON_FUN_GIFS[Math.floor(Math.random() * BUTTON_FUN_GIFS.length)];
+
+  confettiLayer.innerHTML = '';
+  for (let i = 0; i < 80; i++) {
+    const piece = document.createElement('span');
+    piece.className = 'confetti-piece';
+    piece.textContent = CONFETTI_EMOJI[Math.floor(Math.random() * CONFETTI_EMOJI.length)];
+    piece.style.left = Math.random() * 100 + '%';
+    piece.style.animationDelay = (Math.random() * 0.6) + 's';
+    piece.style.animationDuration = (2 + Math.random() * 1.2) + 's';
+    piece.style.fontSize = (16 + Math.random() * 16) + 'px';
+    confettiLayer.appendChild(piece);
+  }
+
+  overlay.style.display = 'flex';
+  return new Promise(resolve => setTimeout(() => {
+    overlay.style.display = 'none';
+    resolve();
+  }, 3000));
+}
+
+async function triggerScrape(gw) {
+  const btn = document.getElementById('scrapeBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Starting...';
+
+  const funPromise = showButtonFun();
+
+  try {
+    const res = await fetch('/api/scrape', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gw })
+    });
+    const data = await res.json();
+    await funPromise;
+
+    if (res.status === 409) {
+      alert('Scraper is already running — please wait for it to finish.');
+      btn.disabled = false;
+      btn.textContent = '🔄 Press the Button';
+    } else {
+      // Reload immediately so banner shows "running" state
+      window.location.reload();
+    }
+  } catch(e) {
+    await funPromise;
+    btn.disabled = false;
+    btn.textContent = '🔄 Press the Button';
+  }
+}
+</script>
+
+{% endblock %}

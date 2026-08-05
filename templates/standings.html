@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Standings · Fútbol de Fantasía{% endblock %}
+
+{% block content %}
+
+<!-- ── Standings Table ──────────────────────────────────────────────────── -->
+<section class="section">
+  <h2 class="section-title">⚽ Standings <span class="season-badge">{{ season }}</span></h2>
+
+  <div class="table-wrap">
+    <table class="data-table standings-table">
+      <thead>
+        <tr>
+          <th class="col-rank">#</th>
+          <th class="col-team">Team</th>
+          <th class="col-stat">W</th>
+          <th class="col-stat">L</th>
+          <th class="col-stat">T</th>
+          <th class="col-stat">PF</th>
+          <th class="col-stat">PA</th>
+          <th class="col-stat">DIFF</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in standings %}
+        {% set diff = row.pts_for - row.pts_against %}
+        <tr {% if loop.index == 4 %}class="playoff-cutoff"{% endif %}>
+          <td class="col-rank rank-num">{{ loop.index }}</td>
+          <td class="col-team">
+            <div class="standings-team-cell">
+              {% if row.photo_path %}
+              <img src="{{ url_for('static', filename=row.photo_path) }}" class="team-avatar team-avatar-sm" />
+              {% else %}
+              <div class="team-avatar team-avatar-sm team-avatar-placeholder">{{ row.name[0]|upper }}</div>
+              {% endif %}
+              <div>
+                <span class="manager-name">{{ row.name }}</span>
+                <span class="team-name">{{ row.team_name }}</span>
+              </div>
+            </div>
+          </td>
+          <td class="col-stat stat-win">{{ row.wins }}</td>
+          <td class="col-stat stat-loss">{{ row.losses }}</td>
+          <td class="col-stat">{{ row.ties }}</td>
+          <td class="col-stat">{{ "%.2f"|format(row.pts_for) }}</td>
+          <td class="col-stat">{{ "%.2f"|format(row.pts_against) }}</td>
+          <td class="col-stat diff {% if diff > 0 %}diff-pos{% elif diff < 0 %}diff-neg{% endif %}">
+            {% if diff > 0 %}+{% endif %}{{ "%.2f"|format(diff) }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ── Season at a Glance ───────────────────────────────────────────────── -->
+<section class="section">
+  <h2 class="section-title">📅 Season at a Glance</h2>
+
+  <div class="table-wrap glance-wrap">
+    <table class="data-table glance-table">
+      <thead>
+        <tr>
+          <th class="col-gw">GW</th>
+          {% for mgr in managers %}
+          <th class="col-mgr">{{ mgr.name }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for gw in gws %}
+        <tr>
+          <td class="col-gw gw-label">{{ gw }}</td>
+          {% for mgr in managers %}
+            {% set cell = glance.get(gw, {}).get(mgr.id) %}
+            {% if cell %}
+              {% if cell.win %}
+                <td class="glance-cell cell-win">
+                  <span class="result-badge badge-win">W</span>
+                  <span class="cell-pts">{{ "%.2f"|format(cell.fantasy_score) }}</span>
+                </td>
+              {% elif cell.loss %}
+                <td class="glance-cell cell-loss">
+                  <span class="result-badge badge-loss">L</span>
+                  <span class="cell-pts">{{ "%.2f"|format(cell.fantasy_score) }}</span>
+                </td>
+              {% else %}
+                <td class="glance-cell cell-tie">
+                  <span class="result-badge badge-tie">T</span>
+                  <span class="cell-pts">{{ "%.2f"|format(cell.fantasy_score) }}</span>
+                </td>
+              {% endif %}
+            {% else %}
+              <td class="glance-cell cell-empty">–</td>
+            {% endif %}
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% endblock %}

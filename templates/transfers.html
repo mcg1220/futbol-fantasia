@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}Transfer Room · Fútbol de Fantasía{% endblock %}
+
+{% block content %}
+<section class="section">
+  <h2 class="section-title">🔁 Transfer Room</h2>
+  <p style="color:var(--text-secondary);margin-top:-8px">
+    Live transfer news from a curated list of trusted journalists — no rumor mills, no aggregators.
+  </p>
+
+  <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;margin-top:16px">
+    <div class="table-wrap" style="padding:28px;flex:2;min-width:320px;text-align:center">
+      {% if transfer_list_url %}
+      <p style="color:var(--text-secondary);margin-top:0">
+        🐦 X now requires viewers to be signed in to see embedded feeds, so we can't show the live timeline directly on this page —
+        but the List itself is public. Open it on X to see the latest posts from the tracked journalists.
+      </p>
+      <a href="{{ transfer_list_url }}" target="_blank" rel="noopener" class="primary-btn" style="text-decoration:none;display:inline-block">🔗 Open Transfer List on X</a>
+      {% else %}
+      <div style="color:var(--text-secondary)">
+        📭 The live feed isn't configured yet — the X List URL hasn't been set.
+      </div>
+      {% endif %}
+    </div>
+
+    <div style="flex:1;min-width:280px;display:flex;flex-direction:column;gap:16px">
+      <div class="table-wrap" style="padding:20px">
+        <h3 style="margin-top:0">Tracked Journalists</h3>
+        <table class="data-table" id="journalists-table">
+          <thead><tr><th style="text-align:left">Name</th><th style="text-align:left">Handle</th></tr></thead>
+          <tbody id="journalists-tbody">
+            {% for j in journalists %}
+            <tr id="journalist-row-{{ j.id }}">
+              <td style="text-align:left">
+                <div style="font-weight:600">{{ j.name }}</div>
+                {% if j.notes %}<div style="font-size:12px;color:var(--text-muted)">{{ j.notes }}</div>{% endif %}
+              </td>
+              <td style="text-align:left"><a href="https://x.com/{{ j.x_handle }}" target="_blank" rel="noopener">@{{ j.x_handle }}</a></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="2" style="color:var(--text-muted)">No journalists tracked yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if pending %}
+      <div class="table-wrap" style="padding:20px">
+        <h3 style="margin-top:0">Pending Proposals</h3>
+        <div id="pending-list" style="display:flex;flex-direction:column;gap:14px">
+          {% for j in pending %}
+          <div id="pending-row-{{ j.id }}" style="border-bottom:1px solid var(--border);padding-bottom:12px">
+            <div style="font-weight:600">{{ j.name }} <span style="font-weight:400;color:var(--text-muted)">@{{ j.x_handle }}</span></div>
+            {% if j.notes %}<div style="font-size:12px;color:var(--text-muted)">{{ j.notes }}</div>{% endif %}
+            <div style="font-size:12px;color:var(--text-muted)">Proposed by {{ j.proposed_by }}</div>
+            <div style="display:flex;gap:8px;margin-top:8px">
+              <button type="button" class="action-btn" onclick="approveJournalist({{ j.id }})">✅ Approve</button>
+              <button type="button" class="action-btn" onclick="showDeclineField({{ j.id }})">❌ Decline</button>
+            </div>
+            <div id="decline-field-{{ j.id }}" style="display:none;margin-top:8px;flex-direction:column;gap:6px">
+              <input type="text" id="decline-reason-{{ j.id }}" class="player-search-input" placeholder="Reason for declining" />
+              <div id="decline-error-{{ j.id }}" style="display:none;color:var(--pl-magenta);font-size:13px"></div>
+              <button type="button" class="action-btn" onclick="rejectJournalist({{ j.id }})">Submit Decline</button>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      {% if declined %}
+      <div class="table-wrap" style="padding:20px">
+        <h3 style="margin-top:0">Recently Declined</h3>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          {% for j in declined %}
+          <div>
+            <div style="font-weight:600">{{ j.name }} <span style="font-weight:400;color:var(--text-muted)">@{{ j.x_handle }}</span></div>
+            <div style="font-size:12px;color:var(--text-muted)">Proposed by {{ j.proposed_by }} — declined: {{ j.review_note }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="table-wrap" style="padding:20px">
+        <h3 style="margin-top:0">Propose a Journalist</h3>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <label class="gw-jump-label">Proposed by</label>
+          <select id="jn-proposer" class="gw-jump-select">
+            <option value="">— Select manager —</option>
+            {% for m in managers %}
+            <option value="{{ m.name }}">{{ m.name }} ({{ m.team_name }})</option>
+            {% endfor %}
+          </select>
+          <input type="text" id="jn-name" class="player-search-input" placeholder="Name" />
+          <input type="text" id="jn-handle" class="player-search-input" placeholder="X handle (no @)" />
+          <input type="text" id="jn-notes" class="player-search-input" placeholder="Why do you trust them?" />
+          <div id="jn-error" style="display:none;color:var(--pl-magenta);font-size:13px"></div>
+          <button type="button" class="action-btn" onclick="proposeJournalist()">+ Propose Journalist</button>
+        </div>
+        <p style="font-size:11px;color:var(--text-muted);margin-top:14px">
+          Proposals are reviewed periodically. Approving here doesn't update the actual X List — that's a separate manual step on X's side.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+async function proposeJournalist() {
+  const errEl = document.getElementById('jn-error');
+  errEl.style.display = 'none';
+
+  const proposed_by = document.getElementById('jn-proposer').value;
+  const name = document.getElementById('jn-name').value.trim();
+  const x_handle = document.getElementById('jn-handle').value.trim();
+  const notes = document.getElementById('jn-notes').value.trim();
+  if (!proposed_by || !name || !x_handle) {
+    errEl.textContent = 'Proposer, name, and X handle are required.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const res = await fetch('/transfers/journalists/propose', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ name, x_handle, notes, proposed_by })
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    errEl.textContent = data.error || 'Propose failed';
+    errEl.style.display = 'block';
+    return;
+  }
+  window.location.reload();
+}
+
+async function approveJournalist(id) {
+  await fetch(`/transfers/journalists/${id}/approve`, { method: 'POST' });
+  window.location.reload();
+}
+
+function showDeclineField(id) {
+  document.getElementById(`decline-field-${id}`).style.display = 'flex';
+}
+
+async function rejectJournalist(id) {
+  const errEl = document.getElementById(`decline-error-${id}`);
+  errEl.style.display = 'none';
+  const reason = document.getElementById(`decline-reason-${id}`).value.trim();
+  if (!reason) {
+    errEl.textContent = 'A reason is required.';
+    errEl.style.display = 'block';
+    return;
+  }
+  const res = await fetch(`/transfers/journalists/${id}/reject`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ reason })
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    errEl.textContent = data.error || 'Decline failed';
+    errEl.style.display = 'block';
+    return;
+  }
+  window.location.reload();
+}
+</script>
+{% endblock %}

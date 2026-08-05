@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Audit History · Fútbol de Fantasía{% endblock %}
+
+{% block content %}
+<section class="section">
+  <h2 class="section-title">📜 Audit History</h2>
+  <p style="color:var(--text-secondary);margin-top:-8px">
+    Every add/drop, waiver, lineup change, draft action, and profile edit — who did it and when.
+    Locker Room, Transfer Room, and the Scraper keep their own separate logs and aren't included here.
+  </p>
+
+  <div class="table-wrap" style="padding:16px 20px;margin-top:16px;margin-bottom:16px">
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="gw-jump-label">Manager</label>
+        <select id="audit-manager-filter" class="gw-jump-select" style="width:180px" onchange="reloadAuditEntries()">
+          <option value="">— All managers —</option>
+          {% for m in managers %}
+          <option value="{{ m.id }}">{{ m.name }} ({{ m.team_name }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="gw-jump-label">After</label>
+        <input type="datetime-local" id="audit-date-from" class="player-search-input" onchange="reloadAuditEntries()" />
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="gw-jump-label">Before</label>
+        <input type="datetime-local" id="audit-date-to" class="player-search-input" onchange="reloadAuditEntries()" />
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:180px">
+        <label class="gw-jump-label">Keyword</label>
+        <input type="text" id="audit-keyword" class="player-search-input" placeholder="Filter loaded rows by keyword..." oninput="filterAuditRows()" />
+      </div>
+      <button type="button" class="action-btn" onclick="clearAuditFilters()">Clear Filters</button>
+    </div>
+  </div>
+
+  <div class="table-wrap pool-table-wrap">
+    <table class="data-table" id="audit-table">
+      <thead>
+        <tr>
+          <th style="text-align:left">Timestamp</th>
+          <th style="text-align:left">Manager</th>
+          <th style="text-align:left">Action</th>
+          <th style="text-align:left">Details</th>
+        </tr>
+      </thead>
+      <tbody id="audit-tbody"></tbody>
+    </table>
+  </div>
+
+  <div style="text-align:center;margin-top:16px">
+    <button type="button" class="action-btn" id="audit-load-more-btn" onclick="loadMoreAuditEntries()">Load More</button>
+    <div id="audit-end-msg" style="display:none;color:var(--text-muted);padding:8px">No more entries.</div>
+  </div>
+</section>
+
+<script>
+const INITIAL_AUDIT_ENTRIES = {{ entries|tojson }};
+let AUDIT_HAS_MORE = {{ has_more|tojson }};
+let auditEntries = [];
+
+function escapeAuditHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str == null ? '' : str;
+  return div.innerHTML;
+}
+
+function formatAuditTimestamp(iso) {
+  return (iso || '').slice(0, 19).replace('T', ' ');
+}
+
+function renderAuditRow(e) {
+  const search = `${e.actor_name || 'unknown'} ${e.entity_type} ${e.action} ${e.summary}`.toLowerCase();
+  return `<tr class="audit-row" data-search="${escapeAuditHtml(search)}">
+    <td style="text-align:left;white-space:nowrap">${formatAuditTimestamp(e.created_at)}</td>
+    <td style="text-align:left">${escapeAuditHtml(e.actor_name || 'Unknown')}</td>
+    <td style="text-align:left"><span class="pos-badge">${escapeAuditHtml(e.entity_type)}</span> ${escapeAuditHtml(e.action)}</td>
+    <td style="text-align:left">${escapeAuditHtml(e.summary)}</td>
+  </tr>`;
+}
+
+function renderAuditTable() {
+  const tbody = document.getElementById('audit-tbody');
+  tbody.innerHTML = auditEntries.length
+    ? auditEntries.map(renderAuditRow).join('')
+    : '<tr><td colspan="4" style="color:var(--text-muted)">No audit history yet.</td></tr>';
+  filterAuditRows();
+  document.getElementById('audit-load-more-btn').style.display = AUDIT_HAS_MORE ? 'inline-block' : 'none';
+  document.getElementById('audit-end-msg').style.display = AUDIT_HAS_MORE ? 'none' : 'block';
+}
+
+function currentAuditFilters() {
+  const managerId = document.getElementById('audit-manager-filter').value;
+  const dateFrom = document.getElementById('audit-date-from').value;
+  const dateTo = document.getElementById('audit-date-to').value;
+  const params = new URLSearchParams();
+  if (managerId) params.set('manager_id', managerId);
+  if (dateFrom) params.set('date_from', dateFrom);
+  if (dateTo) params.set('date_to', dateTo);
+  return params;
+}
+
+async function reloadAuditEntries() {
+  const params = currentAuditFilters();
+  const res = await fetch(`/audit-history/feed?${params.toString()}`);
+  const data = await res.json();
+  auditEntries = data.entries;
+  AUDIT_HAS_MORE = data.has_more;
+  renderAuditTable();
+}
+
+async function loadMoreAuditEntries() {
+  if (auditEntries.length === 0) return;
+  const last = auditEntries[auditEntries.length - 1];
+  const params = currentAuditFilters();
+  params.set('before_created_at', last.created_at);
+  params.set('before_id', last.id);
+  const res = await fetch(`/audit-history/feed?${params.toString()}`);
+  const data = await res.json();
+  auditEntries = auditEntries.concat(data.entries);
+  AUDIT_HAS_MORE = data.has_more;
+  renderAuditTable();
+}
+
+function clearAuditFilters() {
+  document.getElementById('audit-manager-filter').value = '';
+  document.getElementById('audit-date-from').value = '';
+  document.getElementById('audit-date-to').value = '';
+  document.getElementById('audit-keyword').value = '';
+  reloadAuditEntries();
+}
+
+function filterAuditRows() {
+  const q = document.getElementById('audit-keyword').value.toLowerCase();
+  document.querySelectorAll('#audit-table tbody tr.audit-row').forEach(row => {
+    row.style.display = row.getAttribute('data-search').includes(q) ? '' : 'none';
+  });
+}
+
+auditEntries = INITIAL_AUDIT_ENTRIES;
+renderAuditTable();
+</script>
+{% endblock %}

@@ -1,0 +1,541 @@
+{% extends "base.html" %}
+{% block title %}Add/Drop & Waivers · Fútbol de Fantasía{% endblock %}
+
+{% block content %}
+<section class="section">
+  <h2 class="section-title">📊 Add/Drop &amp; Waivers</h2>
+
+  <div class="tab-bar" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+    <button type="button" class="tab-btn active" id="tab-btn-browse" onclick="showTab('browse')">Browse &amp; Add/Drop</button>
+    <button type="button" class="tab-btn" id="tab-btn-myclaims" onclick="showTab('myclaims')">📝 My Claims</button>
+    <button type="button" class="tab-btn" id="tab-btn-waiverorder" onclick="showTab('waiverorder')">🔀 Waiver Order</button>
+    <button type="button" class="tab-btn" id="tab-btn-waiverresults" onclick="showTab('waiverresults')">📣 Waiver Results</button>
+    <button type="button" class="tab-btn" id="tab-btn-transactions" onclick="showTab('transactions')">🧾 Transaction Log</button>
+  </div>
+
+  <div id="tab-browse">
+  <div class="table-wrap" style="padding:20px">
+    {% if waiver_window %}
+    <div style="padding:10px 14px;margin-bottom:14px;border-radius:8px;background:#FFF8E1;color:#8a6d00;font-size:13px;font-weight:600">
+      🟡 Waivers open (following GW{{ waiver_window.gw }}) — unrostered players can only be claimed, not instantly added. Manage your claims in the "My Claims" tab.
+    </div>
+    {% else %}
+    <div style="padding:10px 14px;margin-bottom:14px;border-radius:8px;background:#E8F5E9;color:#2e7d32;font-size:13px;font-weight:600">
+      🟢 Free agency — adds are instant.
+    </div>
+    {% endif %}
+    <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="gw-jump-label">Managing as</label>
+        <select id="as-manager-select" class="gw-jump-select" style="width:200px" onchange="onManagerChange(this.value)">
+          <option value="">— Browse only —</option>
+          {% for m in managers %}
+          <option value="{{ m.id }}" {% if as_manager_id == m.id %}selected{% endif %}>{{ m.name }} ({{ m.team_name }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:200px">
+        <label class="gw-jump-label">Search all players</label>
+        <input type="text" class="player-search-input" placeholder="Filter by name or club..." oninput="applyFilters()" id="player-search" />
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="gw-jump-label">Eligible for <span style="font-weight:400;color:var(--text-muted)">(all checked)</span></label>
+        <div style="display:flex;gap:10px;padding-top:4px">
+          {% for pos in ['GK', 'DEF', 'MID', 'FW'] %}
+          <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer">
+            <input type="checkbox" class="position-checkbox" value="{{ pos }}" onchange="applyFilters()" /> {{ pos }}
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="gw-jump-label">&nbsp;</label>
+        <button type="button" class="action-btn" id="toggle-2025-btn" onclick="toggle2025()">Hide 2025–26 stats</button>
+      </div>
+    </div>
+
+    <div id="add-banner" style="display:none;padding:10px 14px;margin-bottom:12px;border-radius:8px;background:var(--pl-magenta-bg);color:var(--pl-magenta);font-size:13px;font-weight:600"></div>
+
+    <div class="table-wrap">
+      <table class="data-table" id="browse-table">
+        <thead>
+          <tr>
+            <th class="sortable" style="text-align:left" onclick="sortBrowse(0)">Player</th>
+            <th class="sortable" style="text-align:left" onclick="sortBrowse(1)">Club</th>
+            <th style="text-align:left">Next Match</th>
+            <th style="text-align:left">Eligible</th>
+            <th style="text-align:left">Owner</th>
+            <th class="sortable col-2025" data-type="num" onclick="sortBrowse(5)">2025–26 FPts</th>
+            <th class="sortable col-2025" data-type="num" onclick="sortBrowse(6)">2025–26 Avg</th>
+            <th class="sortable" data-type="num" onclick="sortBrowse(7)">2026–27 FPts</th>
+            <th class="sortable" data-type="num" onclick="sortBrowse(8)">2026–27 Avg</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in browse_players %}
+          <tr class="browse-row" data-player="{{ p.name|lower }} {{ p.club|lower }}" data-name="{{ p.name }}" data-owner="{{ p.owner_manager_id or '' }}" data-eligibility="{{ p.eligibility|join(',') }}">
+            <td style="text-align:left;font-weight:600" onclick="toggleHistory('{{ p.name }}')" class="player-name-cell">
+              <span class="expand-caret">▸</span> {{ p.name }}
+            </td>
+            <td style="text-align:left">{{ p.club }}</td>
+            <td style="text-align:left">
+              {% if p.next_opponent %}
+                vs {{ p.next_opponent }}
+                {% if p.next_kickoff %}<br><span class="fixture-time">{{ p.next_kickoff[0] }}, {{ p.next_kickoff[1] }}</span>{% endif %}
+              {% else %}<span style="color:var(--text-muted)">—</span>{% endif %}
+            </td>
+            <td style="text-align:left">
+              {% for pos in p.eligibility %}<span class="pos-badge">{{ pos }}</span>{% endfor %}
+            </td>
+            <td style="text-align:left">
+              {% if p.owner_name %}
+                {% if as_manager_id and p.owner_manager_id == as_manager_id %}
+                  <span style="color:var(--pl-magenta);font-weight:600">On your roster</span>
+                {% else %}
+                  {{ p.owner_name }} ({{ p.owner_team }})
+                {% endif %}
+              {% else %}<span style="color:var(--text-muted)">Free Agent</span>{% endif %}
+            </td>
+            <td class="col-2025">{{ '%.2f'|format(p.pts_2025_26) }}</td>
+            <td class="col-2025">{{ '%.2f'|format(p.avg_2025_26) }}</td>
+            <td>{{ '%.2f'|format(p.pts_2026_27) }}</td>
+            <td>{{ '%.2f'|format(p.avg_2026_27) }}</td>
+            <td class="browse-action-cell">
+              {% if not p.owner_manager_id and as_manager_id %}
+                {% if waiver_window %}
+                <button type="button" class="action-btn add-btn" onclick="startClaim('{{ p.name }}')">Claim</button>
+                {% else %}
+                <button type="button" class="action-btn add-btn" onclick="startAdd('{{ p.name }}')">Add</button>
+                {% endif %}
+              {% endif %}
+            </td>
+          </tr>
+          <tr class="history-row" id="history-row-{{ loop.index }}" data-name="{{ p.name }}" style="display:none">
+            <td colspan="10" class="game-log-table-wrap">
+              <div class="player-history-panel" id="history-panel-{{ loop.index }}">Loading...</div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  </div>
+
+  <div id="tab-myclaims" style="display:none">
+    {% if as_manager_id %}
+    {% for m in managers %}
+    {% if m.id == as_manager_id %}
+    <p style="color:var(--text-secondary);font-size:13px;margin:-4px 0 12px">Viewing claims as: <strong style="color:var(--text-primary)">{{ m.name }}</strong> ({{ m.team_name }})</p>
+    {% endif %}
+    {% endfor %}
+    {% endif %}
+    {% if not as_manager_id %}
+    <div class="table-wrap" style="padding:28px;text-align:center;color:var(--text-secondary)">
+      Pick a manager under "Managing as" on the Browse tab to see their claims.
+    </div>
+    {% elif not waiver_window %}
+    <div class="table-wrap" style="padding:28px;text-align:center;color:var(--text-secondary)">
+      No waiver window is currently open — use Add/Drop on the Browse tab instead.
+    </div>
+    {% elif not my_claims %}
+    <div class="table-wrap" style="padding:28px;text-align:center;color:var(--text-secondary)">
+      No pending claims yet. Find a player on the Browse tab and click "Claim".
+    </div>
+    {% else %}
+    <p style="color:var(--text-secondary);font-size:12px;margin:-4px 0 8px">Drag a row (⠿) to reorder, or use the ↑/↓ buttons.</p>
+    <div class="table-wrap">
+      <table class="data-table" id="claims-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Priority</th>
+            <th style="text-align:left">Add</th>
+            <th style="text-align:left">Drop</th>
+            <th>Reorder</th>
+            <th>Remove</th>
+          </tr>
+        </thead>
+        <tbody id="claims-tbody">
+          {% for cl in my_claims %}
+          <tr draggable="true" data-claim-id="{{ cl.id }}" class="claim-row">
+            <td style="cursor:grab;color:var(--text-muted)">⠿</td>
+            <td>{{ cl.priority }}</td>
+            <td style="text-align:left">{{ cl.add_player }}</td>
+            <td style="text-align:left">{{ cl.drop_player }}</td>
+            <td>
+              <button type="button" class="action-btn" onclick="reorderClaim({{ cl.id }}, 'up')">↑</button>
+              <button type="button" class="action-btn" onclick="reorderClaim({{ cl.id }}, 'down')">↓</button>
+            </td>
+            <td><button type="button" class="action-btn" onclick="removeClaim({{ cl.id }})">Remove</button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+
+  <div id="tab-waiverorder" style="display:none">
+    <div class="table-wrap" style="padding:16px 20px;margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      {% if waiver_window %}
+      <span>🟡 Waiver window following GW{{ waiver_window.gw }} — open since {{ waiver_window.opened_at[:16].replace('T', ' ') }}.</span>
+      <button type="button" class="primary-btn" onclick="processWaivers()">🔒 Close &amp; Process Waivers</button>
+      {% else %}
+      <span>🟢 No waiver window open.</span>
+      <button type="button" class="primary-btn" onclick="openWaiverWindow()">📬 Open Waiver Window</button>
+      {% endif %}
+    </div>
+    {% if not waiver_order %}
+    <div class="table-wrap" style="padding:28px;text-align:center;color:var(--text-secondary)">
+      Waiver order hasn't been seeded yet — it's set from the reverse draft order the first time a window opens.
+    </div>
+    {% else %}
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>#</th><th style="text-align:left">Manager</th></tr></thead>
+        <tbody>
+          {% for o in waiver_order %}
+          <tr><td>{{ o.position }}</td><td style="text-align:left">{{ o.name }} — {{ o.team_name }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+
+  <div id="tab-waiverresults" style="display:none">
+    {% if not waiver_results %}
+    <div class="table-wrap" style="padding:28px;text-align:center;color:var(--text-secondary)">
+      No waiver windows have been processed yet.
+    </div>
+    {% endif %}
+    {% for w in waiver_results %}
+    <div class="table-wrap" style="margin-bottom:14px;padding:0;overflow:hidden">
+      <details {% if loop.first %}open{% endif %}>
+        <summary style="cursor:pointer;padding:14px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+          <strong>Following GW{{ w.gw }}</strong>
+          <span style="color:var(--text-secondary)">
+            {% if w.status == 'complete' %}Closed {{ w.closed_at[:16].replace('T', ' ') }}{% else %}Still open{% endif %}
+          </span>
+          <span style="margin-left:auto;font-size:0.9em;color:var(--text-secondary)">{{ w.claims|length }} claim(s)</span>
+        </summary>
+        <div style="padding:0 20px 18px 20px">
+          {% if not w.claims %}
+          <p style="color:var(--text-secondary);font-size:0.9em">No claims were submitted this window.</p>
+          {% else %}
+          <table class="data-table">
+            <thead>
+              <tr><th>#</th><th style="text-align:left">Manager</th><th style="text-align:left">Add</th><th style="text-align:left">Drop</th><th>Result</th><th style="text-align:left">Reason</th></tr>
+            </thead>
+            <tbody>
+              {% for cl in w.claims %}
+              <tr>
+                <td>{{ cl.sequence_number or '—' }}</td>
+                <td style="text-align:left">{{ cl.manager_name }} — {{ cl.team_name }}</td>
+                <td style="text-align:left">{{ cl.add_player }}</td>
+                <td style="text-align:left">{{ cl.drop_player }}</td>
+                <td>{% if cl.status == 'success' %}✅{% elif cl.status == 'failed' %}❌{% else %}⏳{% endif %} {{ cl.status }}</td>
+                <td style="text-align:left;color:var(--text-secondary)">{{ cl.fail_reason or '' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% endif %}
+        </div>
+      </details>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div id="tab-transactions" style="display:none">
+    {% if not transactions %}
+    <div class="table-wrap" style="padding:28px;text-align:center;color:var(--text-secondary)">
+      No transactions recorded yet.
+    </div>
+    {% else %}
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Date/Time</th>
+            <th>Team</th>
+            <th>Added</th>
+            <th>Dropped</th>
+            <th>Source</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in transactions %}
+          <tr>
+            <td>{{ t.created_at[:16].replace('T', ' ') }}</td>
+            <td>{{ t.manager_name }} — {{ t.team_name }}</td>
+            <td>{% if t.added_player %}<span style="color:#2e7d32">+ {{ t.added_player }}</span>{% endif %}</td>
+            <td>{% if t.dropped_player %}<span style="color:#c62828">− {{ t.dropped_player }}</span>{% endif %}</td>
+            <td>{{ t.source }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</section>
+
+<div id="drop-modal" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <h3 id="drop-modal-title">Choose who to drop</h3>
+    <div id="drop-modal-roster"></div>
+    <button type="button" class="action-btn" onclick="closeDropModal()">Cancel</button>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/game_log.js') }}"></script>
+<script src="{{ url_for('static', filename='js/roster_picker.js') }}"></script>
+<script>
+const CURRENT_GW = {{ current_gw }};
+
+const TABS = ['browse', 'myclaims', 'waiverorder', 'waiverresults', 'transactions'];
+function showTab(name) {
+  TABS.forEach(t => {
+    document.getElementById(`tab-${t}`).style.display = t === name ? '' : 'none';
+    document.getElementById(`tab-btn-${t}`).classList.toggle('active', t === name);
+  });
+  localStorage.setItem('activeTab', name);
+}
+
+showTab(TABS.includes(localStorage.getItem('activeTab')) ? localStorage.getItem('activeTab') : 'browse');
+
+function onManagerChange(val) {
+  const url = new URL(window.location);
+  if (val) url.searchParams.set('as_manager', val);
+  else url.searchParams.delete('as_manager');
+  window.location = url;
+}
+
+function applyHide2025(hidden) {
+  document.querySelectorAll('.col-2025').forEach(el => {
+    el.style.display = hidden ? 'none' : '';
+  });
+  document.getElementById('toggle-2025-btn').textContent = hidden ? 'Show 2025–26 stats' : 'Hide 2025–26 stats';
+
+  // Re-render any already-loaded per-player history panels with the new filter.
+  Object.keys(historyDataCache).forEach(name => {
+    const panel = document.querySelector(`.history-row[data-name="${CSS.escape(name)}"] .player-history-panel`);
+    if (panel) { panel.innerHTML = renderHistoryTable(historyDataCache[name], hidden, panel.id); initGameLogSort(panel.id); }
+  });
+}
+
+function toggle2025() {
+  const hidden = localStorage.getItem('hide2025') !== 'true';
+  localStorage.setItem('hide2025', hidden);
+  applyHide2025(hidden);
+}
+
+applyHide2025(localStorage.getItem('hide2025') === 'true');
+
+function applyFilters() {
+  const q = document.getElementById('player-search').value.toLowerCase();
+  const wantedPositions = Array.from(document.querySelectorAll('.position-checkbox:checked')).map(cb => cb.value);
+  document.querySelectorAll('#browse-table tbody tr.browse-row').forEach(row => {
+    const nameMatch = row.getAttribute('data-player').includes(q);
+    const eligibility = row.getAttribute('data-eligibility').split(',');
+    const posMatch = wantedPositions.every(pos => eligibility.includes(pos));
+    const match = nameMatch && posMatch;
+    row.style.display = match ? '' : 'none';
+    const hist = row.nextElementSibling;
+    if (hist && !match) hist.style.display = 'none';
+  });
+}
+
+let sortState = {};
+function sortBrowse(colIndex) {
+  const table = document.getElementById('browse-table');
+  const tbody = table.querySelector('tbody');
+  const th = table.querySelectorAll('th')[colIndex];
+  const isNum = th.getAttribute('data-type') === 'num';
+
+  const asc = sortState[colIndex] !== 'asc';
+  sortState = { [colIndex]: asc ? 'asc' : 'desc' };
+
+  // Keep each browse-row paired with its following history-row while sorting.
+  const pairs = [];
+  const browseRows = Array.from(tbody.querySelectorAll('tr.browse-row'));
+  for (const row of browseRows) {
+    pairs.push([row, row.nextElementSibling]);
+  }
+
+  pairs.sort((a, b) => {
+    const aCell = a[0].children[colIndex];
+    const bCell = b[0].children[colIndex];
+    let aVal, bVal;
+    if (isNum) {
+      aVal = parseFloat(aCell.textContent) || 0;
+      bVal = parseFloat(bCell.textContent) || 0;
+    } else {
+      aVal = aCell.textContent.trim().toLowerCase();
+      bVal = bCell.textContent.trim().toLowerCase();
+    }
+    if (aVal < bVal) return asc ? -1 : 1;
+    if (aVal > bVal) return asc ? 1 : -1;
+    return 0;
+  });
+
+  pairs.forEach(([browseRow, histRow]) => {
+    tbody.appendChild(browseRow);
+    if (histRow) tbody.appendChild(histRow);
+  });
+
+  table.querySelectorAll('th').forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
+  th.classList.add(asc ? 'sort-asc' : 'sort-desc');
+}
+
+async function toggleHistory(name) {
+  const rows = document.querySelectorAll('.history-row');
+  for (const row of rows) {
+    if (row.getAttribute('data-name') !== name) continue;
+    if (row.style.display === 'none') {
+      row.style.display = '';
+      const panel = row.querySelector('.player-history-panel');
+      const hidden = localStorage.getItem('hide2025') === 'true';
+      await loadPlayerHistory(name, panel, hidden);
+    } else {
+      row.style.display = 'none';
+    }
+  }
+}
+
+let pendingAdd = null;
+let pendingMode = 'add'; // 'add' | 'claim'
+
+async function openDropModal(playerName, mode, title) {
+  pendingAdd = playerName;
+  pendingMode = mode;
+  document.getElementById('drop-modal-title').textContent = title;
+  const rosterDiv = document.getElementById('drop-modal-roster');
+  rosterDiv.innerHTML = 'Loading roster...';
+  document.getElementById('drop-modal').style.display = 'flex';
+
+  const managerId = document.getElementById('as-manager-select').value;
+  try {
+    const res = await fetch(`/api/manager/${managerId}/roster`);
+    const roster = await res.json();
+    rosterDiv.innerHTML = renderRosterPicker(roster) || '<div class="empty-state">No roster players found.</div>';
+  } catch (e) {
+    rosterDiv.innerHTML = '<div class="empty-state">Could not load roster — try closing and reopening this dialog.</div>';
+    console.error(e);
+  }
+}
+
+function startAdd(playerName) {
+  openDropModal(playerName, 'add', `Adding ${playerName} — drop who?`);
+}
+
+function startClaim(playerName) {
+  openDropModal(playerName, 'claim', `Claiming ${playerName} — drop who if it succeeds?`);
+}
+
+function closeDropModal() {
+  pendingAdd = null;
+  document.getElementById('drop-modal').style.display = 'none';
+}
+
+async function confirmSwap(dropPlayer) {
+  try {
+    const managerId = document.getElementById('as-manager-select').value;
+    const url = pendingMode === 'claim' ? '/api/waiver/claim' : '/api/roster/swap';
+    const body = pendingMode === 'claim'
+      ? { manager_id: parseInt(managerId), add_player: pendingAdd, drop_player: dropPlayer, gw: CURRENT_GW }
+      : { manager_id: parseInt(managerId), drop_player: dropPlayer, add_player: pendingAdd, gw: CURRENT_GW };
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    closeDropModal();
+    if (!res.ok) {
+      alert(data.error || (pendingMode === 'claim' ? 'Claim failed' : 'Swap failed'));
+      return;
+    }
+    window.location.reload();
+  } catch (e) {
+    alert('Something went wrong submitting this — check the console and try again.');
+    console.error(e);
+  }
+}
+
+async function reorderClaim(claimId, direction) {
+  const res = await fetch(`/api/waiver/claim/${claimId}/reorder`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ direction })
+  });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Reorder failed'); return; }
+  window.location.reload();
+}
+
+async function removeClaim(claimId) {
+  if (!confirm('Remove this claim?')) return;
+  const res = await fetch(`/api/waiver/claim/${claimId}`, { method: 'DELETE' });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Remove failed'); return; }
+  window.location.reload();
+}
+
+// ── Drag-and-drop claim reordering ──────────────────────────────────────
+(function() {
+  const tbody = document.getElementById('claims-tbody');
+  if (!tbody) return;
+  let dragRow = null;
+
+  tbody.querySelectorAll('tr.claim-row').forEach(row => {
+    row.addEventListener('dragstart', () => { dragRow = row; row.style.opacity = '0.5'; });
+    row.addEventListener('dragend', () => { row.style.opacity = ''; });
+    row.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (!dragRow || dragRow === row) return;
+      const rows = Array.from(tbody.querySelectorAll('tr.claim-row'));
+      const dragIdx = rows.indexOf(dragRow);
+      const overIdx = rows.indexOf(row);
+      if (dragIdx < overIdx) row.after(dragRow); else row.before(dragRow);
+    });
+    row.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      const orderedIds = Array.from(tbody.querySelectorAll('tr.claim-row')).map(r => parseInt(r.getAttribute('data-claim-id')));
+      const res = await fetch('/api/waiver/claims/reorder-all', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ ordered_claim_ids: orderedIds })
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || 'Reorder failed'); return; }
+      window.location.reload();
+    });
+  });
+})();
+
+async function openWaiverWindow() {
+  if (!confirm('Open a new waiver window? Unrostered players will only be claimable via waivers until you process and close it.')) return;
+  const res = await fetch('/api/waiver/open', { method: 'POST' });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Open failed'); return; }
+  window.location.reload();
+}
+
+async function processWaivers() {
+  if (!confirm('Close the waiver window and process all pending claims now? This cannot be undone.')) return;
+  const res = await fetch('/api/waiver/process', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ gw: CURRENT_GW })
+  });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Processing failed'); return; }
+  window.location.reload();
+}
+</script>
+{% endblock %}

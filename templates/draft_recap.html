@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Draft Recap · Fútbol de Fantasía{% endblock %}
+
+{% block content %}
+<section class="section">
+  <h2 class="section-title">🎙️ Draft Recap — {{ season }}</h2>
+
+  <div class="table-wrap" style="padding:16px 20px;margin-bottom:16px;display:flex;gap:12px;align-items:center">
+    <label class="gw-jump-label">Your name (for comments)</label>
+    <input type="text" id="commenter-name" class="player-search-input" style="max-width:200px" placeholder="e.g. Mike" />
+  </div>
+
+  {% for m in managers %}
+  <div class="table-wrap draft-recap-card" style="padding:20px;margin-bottom:20px">
+    <div class="team-header-left" style="margin-bottom:14px">
+      {% if m.photo_path %}
+      <img src="{{ url_for('static', filename=m.photo_path) }}" class="team-avatar team-avatar-md" />
+      {% else %}
+      <div class="team-avatar team-avatar-md team-avatar-placeholder">{{ m.name[0]|upper }}</div>
+      {% endif %}
+      <div class="team-header-text">
+        <h3 style="margin:0">{{ m.name }}</h3>
+        <span class="team-team-name">{{ m.team_name }}</span>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Pick</th><th>Round</th><th style="text-align:left">Player</th>
+            <th style="text-align:left">Slot</th><th>Comments</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in picks_by_manager.get(m.id, []) %}
+          <tr>
+            <td>{{ p.overall_pick }}</td>
+            <td>{{ p.round }}</td>
+            <td style="text-align:left;font-weight:600">{{ p.player_name }}</td>
+            <td style="text-align:left"><span class="pos-badge">{{ p.position_slot or p.slot_type }}</span></td>
+            <td>
+              <button type="button" class="action-btn" onclick="togglePickComments({{ p.id }})">
+                💬 {{ pick_comments.get(p.id, [])|length }}
+              </button>
+            </td>
+          </tr>
+          <tr class="pick-comments-row" id="pick-comments-{{ p.id }}" style="display:none">
+            <td colspan="5" style="text-align:left;padding:12px 20px">
+              <div id="pick-comment-list-{{ p.id }}">
+                {% for c in pick_comments.get(p.id, []) %}
+                <div class="draft-comment"><strong>{{ c.author_name }}:</strong> {{ c.comment }}</div>
+                {% endfor %}
+              </div>
+              <div style="display:flex;gap:8px;margin-top:8px">
+                <input type="text" class="player-search-input" id="pick-comment-input-{{ p.id }}" placeholder="Add a comment on this pick..." style="flex:1" />
+                <button type="button" class="action-btn" onclick="postComment('pick', {{ p.id }})">Post</button>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="empty-state">No picks yet</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div style="margin-top:14px">
+      <h4 style="margin-bottom:6px">Team comments</h4>
+      <div id="team-comment-list-{{ m.id }}">
+        {% for c in team_comments.get(m.id, []) %}
+        <div class="draft-comment"><strong>{{ c.author_name }}:</strong> {{ c.comment }}</div>
+        {% endfor %}
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <input type="text" class="player-search-input" id="team-comment-input-{{ m.id }}" placeholder="Add a comment on this team's overall draft..." style="flex:1" />
+        <button type="button" class="action-btn" onclick="postComment('team', {{ m.id }})">Post</button>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</section>
+
+<script>
+function togglePickComments(pickId) {
+  const row = document.getElementById(`pick-comments-${pickId}`);
+  row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+}
+
+async function postComment(targetType, targetId) {
+  const author = document.getElementById('commenter-name').value.trim();
+  if (!author) { alert('Enter your name first.'); return; }
+
+  const inputId = targetType === 'pick' ? `pick-comment-input-${targetId}` : `team-comment-input-${targetId}`;
+  const input = document.getElementById(inputId);
+  const comment = input.value.trim();
+  if (!comment) return;
+
+  const res = await fetch('/api/draft/comment', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target_type: targetType, target_id: targetId, author_name: author, comment })
+  });
+  if (!res.ok) { alert('Could not post comment'); return; }
+
+  const listId = targetType === 'pick' ? `pick-comment-list-${targetId}` : `team-comment-list-${targetId}`;
+  const list = document.getElementById(listId);
+  const div = document.createElement('div');
+  div.className = 'draft-comment';
+  div.innerHTML = `<strong>${author}:</strong> ${comment}`;
+  list.appendChild(div);
+  input.value = '';
+}
+</script>
+{% endblock %}

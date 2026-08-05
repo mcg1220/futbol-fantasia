@@ -1,0 +1,36 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Real app data — lives on the host's persistent disk once deployed, not
+# in git. Keeping this out of history also means we never risk publishing
+# real league data if this repo is ever made public or shared.
+data/fantasia.db
+data/fantasia.db.bak-*
+data/scraper_status.json
+data/*.xlsx
+data/*.tsv
+
+# User-uploaded content — same reasoning as the DB above.
+static/uploads/team_photos/*
+static/uploads/memes/*
+!static/uploads/team_photos/.gitkeep
+!static/uploads/memes/.gitkeep
+
+# One-time source material already imported into the DB — not needed for
+# the app to run, kept locally for reference only.
+fantrax schedule and projections/
+working instructions/
+history/
+
+# Working documents, not app source
+*.docx
+
+# Local machine noise
+.DS_Store
+.claude/settings.local.json
+
+# Env vars / secrets — see .env.example for the shape, never commit the
+# real file
+.env

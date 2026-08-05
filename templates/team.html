@@ -1,0 +1,628 @@
+{% extends "base.html" %}
+{% block title %}{{ manager.name }} · Fútbol de Fantasía{% endblock %}
+
+{% block content %}
+
+<!-- ── Manager header ───────────────────────────────────────────────────── -->
+<section class="section">
+  <div class="team-header">
+    <div class="team-header-left">
+      <div class="team-avatar-wrap" onclick="toggleAvatarMenu(event)">
+        {% if manager.photo_path %}
+        <img src="{{ url_for('static', filename=manager.photo_path) }}" class="team-avatar team-avatar-lg" id="team-avatar-img" data-full="{{ url_for('static', filename=manager.photo_path) }}" />
+        {% else %}
+        <div class="team-avatar team-avatar-lg team-avatar-placeholder" id="team-avatar-placeholder">{{ manager.name[0]|upper }}</div>
+        {% endif %}
+        <div class="team-avatar-overlay">📷</div>
+
+        <div class="avatar-menu" id="avatar-menu" style="display:none">
+          {% if manager.photo_path %}
+          <button type="button" onclick="event.stopPropagation(); viewPhoto()">🔍 View Photo</button>
+          {% endif %}
+          <button type="button" onclick="event.stopPropagation(); document.getElementById('photo-input').click()">📷 Change Photo</button>
+        </div>
+      </div>
+      <input type="file" id="photo-input" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none" onchange="uploadPhoto(this.files[0])" />
+
+      <div class="team-header-text">
+        <h2 class="team-manager-name">{{ manager.name }}</h2>
+        <div class="team-name-row">
+          <span class="team-team-name" id="team-name-display">{{ manager.team_name }}</span>
+          <button type="button" class="edit-pencil-btn" onclick="startEditTeamName()" title="Rename team">✏️</button>
+          <input type="text" class="team-name-input" id="team-name-input" value="{{ manager.team_name }}" maxlength="40" style="display:none" />
+          <button type="button" class="action-btn" id="save-team-name-btn" onclick="saveTeamName()" style="display:none">Save</button>
+          <button type="button" class="action-btn" id="cancel-team-name-btn" onclick="cancelEditTeamName()" style="display:none">Cancel</button>
+        </div>
+      </div>
+    </div>
+    {% if matchup %}
+    <div class="team-matchup-badge {% if matchup.my_win %}matchup-win{% elif matchup.my_loss %}matchup-loss{% elif matchup.my_tie %}matchup-tie{% endif %}">
+      <div class="matchup-badge-label">GW{{ current_gw }} Matchup</div>
+      <div class="matchup-badge-scores">
+        <span class="matchup-badge-my">{{ "%.2f"|format(matchup.my_score) if matchup.my_score is not none else "—" }}</span>
+        <span class="matchup-badge-sep">vs</span>
+        <span class="matchup-badge-opp">{{ "%.2f"|format(matchup.opp_score) if matchup.opp_score is not none else "—" }}</span>
+      </div>
+      <a href="/team/{{ matchup.opp_id }}" class="matchup-badge-opp-name">{{ matchup.opp_name }} · {{ matchup.opp_team }}</a>
+    </div>
+    {% endif %}
+    <div class="team-switcher">
+      <label class="gw-jump-label">View team:</label>
+      <select class="gw-jump-select" onchange="location.href='/team/'+this.value">
+        {% for m in all_managers %}
+        <option value="{{ m.id }}" {% if m.id == manager.id %}selected{% endif %}>{{ m.name }} — {{ m.team_name }}</option>
+        {% endfor %}
+      </select>
+      <button type="button" class="action-btn" id="toggle-2025-btn" onclick="toggle2025()" style="margin-left:8px">Hide 2025–26 stats</button>
+    </div>
+  </div>
+</section>
+
+<div id="photo-lightbox" class="modal-overlay" style="display:none" onclick="closePhotoLightbox()">
+  <img id="photo-lightbox-img" src="" style="max-width:90vw;max-height:85vh;border-radius:12px" onclick="event.stopPropagation()" />
+</div>
+
+<!-- ── Roster macro ──────────────────────────────────────────────────────── -->
+{% macro roster_table(players, show_pos_groups, id_prefix, table_id) %}
+{% if players %}
+<div class="table-actions">
+  <button class="action-btn" onclick="toggleAll('{{ table_id }}')">⊞ Expand / Collapse All</button>
+</div>
+<div class="table-wrap">
+  <table class="data-table roster-table" id="{{ table_id }}">
+    <thead>
+      <tr class="col-group-row">
+        <th rowspan="2" style="text-align:left">Player</th>
+        <th rowspan="2" style="text-align:left">Club</th>
+        <th rowspan="2">Slot</th>
+        <th rowspan="2" style="text-align:left">GW Opponent</th>
+        <th colspan="5" class="col-group-header col-group-gw">GW Points</th>
+        <th colspan="2" class="col-group-header col-group-season season-col">Season Points</th>
+        <th rowspan="2"></th>
+      </tr>
+      <tr>
+        <th>Pts</th>
+        <th>Goals</th>
+        <th>Ast</th>
+        <th>Saves</th>
+        <th>Mins</th>
+        <th class="season-col">Avg</th>
+        <th>Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set ns = namespace(cur_pos='') %}
+      {% for player in players %}
+        {% set pos = (player.position_slot or '')|upper %}
+        {% set is_gk      = pos == 'GK' %}
+        {% set is_def     = pos == 'DEF' %}
+        {% set is_mid     = pos == 'MID' %}
+        {% set is_fw      = pos == 'FW' %}
+        {% set is_outfield = is_def or is_mid or is_fw %}
+        {% set is_unknown  = pos not in ('GK','DEF','MID','FW') %}
+        {% set pos_label  = 'GK' if is_gk else 'DEF' if is_def else 'MID' if is_mid else 'FW' if is_fw else '' %}
+        {% set pos_full   = {'GK':'Goalkeepers','DEF':'Defenders','MID':'Midfielders','FW':'Forwards'}.get(pos_label,'') %}
+        {% set club = club_map.get(player.player_name) %}
+        {% set opp  = opponent_map.get(club,'—') if club else '—' %}
+        {% set kickoff = kickoff_map.get(club) if club else None %}
+        {% set s    = stats_map.get(player.player_name) %}
+        {% set pts  = points_map.get(player.player_name, {'gw_score':0,'season_total':0,'season_avg':0}) %}
+        {% set uid  = id_prefix ~ '-' ~ loop.index %}
+        {% set eligible = eligibility_map.get(player.player_name) %}
+        {% set player_locked = locked_map.get(player.player_name, False) %}
+        {% set starter_locked = gw_locked or (player_locked and player.slot_type == 'starter') %}
+        {% set starter_options_locked = gw_locked or player_locked %}
+
+        {% if show_pos_groups and pos_label and pos_label != ns.cur_pos %}
+          {% set ns.cur_pos = pos_label %}
+          <tr class="pos-group-row"><td colspan="12" class="pos-group-label">{{ pos_full }}</td></tr>
+        {% endif %}
+
+        <tr class="player-row" onclick="toggleAccordion('{{ uid }}')">
+          <td style="text-align:left;font-weight:600">{{ player.player_name }}</td>
+          <td style="text-align:left">
+            {% if club and badges.get(club) %}<img src="{{ badges[club] }}" class="club-badge" />{% endif %}
+            {{ club or '—' }}
+          </td>
+          <td>
+            <select class="slot-select pos-{{ pos_label if pos_label else 'BENCH' }}"
+                    data-player="{{ player.player_name }}"
+                    data-manager="{{ manager.id }}"
+                    data-gw="{{ current_gw }}"
+                    {% if starter_locked %}disabled{% endif %}
+                    {% if player_locked or gw_locked %}title="🔒 {% if gw_locked %}GW{{ current_gw }} is locked{% else %}Locked — match already kicked off{% endif %}"{% endif %}
+                    onclick="event.stopPropagation()"
+                    onchange="updateSlot(this)">
+              <optgroup label="Starting XI">
+                {% if not eligible or 'FW' in eligible %}
+                <option value="FW|starter"  {% if player.slot_type=='starter' and pos_label=='FW'  %}selected{% endif %} {% if starter_options_locked %}disabled{% endif %}>Forward</option>
+                {% endif %}
+                {% if not eligible or 'MID' in eligible %}
+                <option value="MID|starter" {% if player.slot_type=='starter' and pos_label=='MID' %}selected{% endif %} {% if starter_options_locked %}disabled{% endif %}>Midfielder</option>
+                {% endif %}
+                {% if not eligible or 'DEF' in eligible %}
+                <option value="DEF|starter" {% if player.slot_type=='starter' and pos_label=='DEF' %}selected{% endif %} {% if starter_options_locked %}disabled{% endif %}>Defender</option>
+                {% endif %}
+                {% if not eligible or 'GK' in eligible %}
+                <option value="GK|starter"  {% if player.slot_type=='starter' and pos_label=='GK'  %}selected{% endif %} {% if starter_options_locked %}disabled{% endif %}>Goalkeeper</option>
+                {% endif %}
+              </optgroup>
+              <option value="bench|bench" {% if player.slot_type=='bench' %}selected{% endif %} {% if gw_locked %}disabled{% endif %}>Bench</option>
+              <option value="ir|ir"       {% if player.slot_type=='ir'    %}selected{% endif %} {% if gw_locked %}disabled{% endif %}>Injury Reserve</option>
+            </select>
+            {% if player_locked or gw_locked %}<span class="lock-icon" title="{% if gw_locked %}GW{{ current_gw }} is locked{% else %}Locked — match already kicked off{% endif %}">🔒</span>{% endif %}
+          </td>
+          <td style="text-align:left">
+            {% if opp != '—' and badges.get(opp) %}<img src="{{ badges[opp] }}" class="club-badge" />{% endif %}
+            {{ opp }}
+            {% if kickoff and kickoff[0] %}<br><span class="fixture-time">{{ kickoff[0] }}, {{ kickoff[1] }}</span>{% endif %}
+          </td>
+          <td class="pts-cell">{{ "%.2f"|format(pts.gw_score) }}</td>
+          <td>{{ s.goals if s and s.goals else '—' }}</td>
+          <td>{{ s.assists if s and s.assists else '—' }}</td>
+          <td>{{ s.saves if s and s.saves else '—' }}</td>
+          <td>{{ s.minutes if s and s.minutes else '—' }}</td>
+          <td class="season-col">{{ "%.2f"|format(pts.season_avg) }}</td>
+          <td>{{ "%.2f"|format(pts.season_total) }}</td>
+          <td class="accordion-toggle">▾</td>
+        </tr>
+
+        <tr class="accordion-row" id="{{ uid }}" style="display:none">
+          <td colspan="12">
+            <div class="stat-accordion">
+
+              <div class="stat-group">
+                <div class="stat-group-label">Attacking</div>
+                <div class="stat-grid">
+                  <div class="stat-item"><span class="stat-label" title="Goals scored by the player">Goals</span><span class="stat-val">{{ s.goals if s and s.goals else 0 }}</span></div>
+                  <div class="stat-item"><span class="stat-label" title="Passes directly leading to a goal">Assists</span><span class="stat-val">{{ s.assists if s and s.assists else 0 }}</span></div>
+                  <div class="stat-item"><span class="stat-label" title="Shots that were on target (saved, blocked at goal line, or scored)">Shots on Target</span><span class="stat-val">{{ s.sot if s and s.sot else 0 }}</span></div>
+                  <div class="stat-item"><span class="stat-label" title="Passes that directly lead to a shot on goal">Key Passes</span><span class="stat-val">{{ s.kp if s and s.kp else 0 }}</span></div>
+                  <div class="stat-item"><span class="stat-label" title="Successful dribbles past an opponent">Dribbles</span><span class="stat-val">{{ s.dribbles if s and s.dribbles else 0 }}</span></div>
+                  <div class="stat-item"><span class="stat-label" title="Goals accidentally scored into the player's own net">Own Goals</span><span class="stat-val">{{ s.own_goals if s and s.own_goals else 0 }}</span></div>
+                </div>
+              </div>
+
+              <div class="stat-group">
+                <div class="stat-group-label">Defensive</div>
+                <div class="stat-grid">
+                  <div class="stat-item"><span class="stat-label" title="Successful tackles winning the ball from an opponent">Tackles</span><span class="stat-val">{{ s.tackles if s and s.tackles else 0 }}</span></div>
+                  <div class="stat-item"><span class="stat-label" title="Passes intercepted before reaching their target">Interceptions</span><span class="stat-val">{{ s.interceptions if s and s.interceptions else 0 }}</span></div>
+                  <div class="stat-item"><span class="stat-label" title="Defensive clearances of the ball away from danger">Clearances</span><span class="stat-val">{{ s.clearances if s and s.clearances else 0 }}</span></div>
+                  {% if pos != 'GK' %}
+                  <div class="stat-item"><span class="stat-label" title="Opponent shots blocked before reaching goal">Blocked Shots</span><span class="stat-val">{{ s.blocked_shots if s and s.blocked_shots else 0 }}</span></div>
+                  {% endif %}
+                  <div class="stat-item"><span class="stat-label" title="Last-defender tackle preventing a clear goalscoring chance">Last Man Tackle</span><span class="stat-val">{{ s.lmt if s and s.lmt else 0 }}</span></div>
+                  <div class="stat-item"><span class="stat-label" title="Clearance made directly off the goal line">Goal Line Clr</span><span class="stat-val">{{ s.glc if s and s.glc else 0 }}</span></div>
+                </div>
+              </div>
+
+              <div class="stat-group">
+                <div class="stat-group-label">Passing</div>
+                <div class="stat-grid">
+                  <div class="stat-item"><span class="stat-label" title="Crosses into the box that found a teammate">Acc. Crosses</span><span class="stat-val">{{ s.acc_crosses if s and s.acc_crosses else 0 }}</span></div>
+                  {% if pos != 'GK' %}
+                  <div class="stat-item"><span class="stat-label" title="Long passes (35+ yards) that found a teammate">Acc. Long Balls</span><span class="stat-val">{{ s.acc_long_balls if s and s.acc_long_balls else 0 }}</span></div>
+                  {% endif %}
+                </div>
+              </div>
+
+              {% if pos == 'GK' %}
+              <div class="stat-group">
+                <div class="stat-group-label">Goalkeeping</div>
+                <div class="stat-grid">
+                  <div class="stat-item"><span class="stat-label" title="Shots saved by the goalkeeper">Saves</span><span class="stat-val">{{ s.saves if s and s.saves else 0 }}</span></div>
+                  <div class="stat-item"><span class="stat-label" title="Penalty kicks saved by the goalkeeper">Penalty Saves</span><span class="stat-val">{{ s.pk_saves if s and s.pk_saves else 0 }}</span></div>
+                </div>
+              </div>
+              {% endif %}
+
+              {% if pos in ('DEF', 'GK') %}
+              <div class="stat-group">
+                <div class="stat-group-label">Team Events</div>
+                <div class="stat-grid">
+                  <div class="stat-item"><span class="stat-label">Clean Sheet</span><span class="stat-val stat-pending" title="Computed from match result">—</span></div>
+                  <div class="stat-item"><span class="stat-label">Goals Conceded</span><span class="stat-val stat-pending" title="Computed from match result">—</span></div>
+                </div>
+              </div>
+              {% endif %}
+
+              <div class="stat-group">
+                <div class="stat-group-label">Discipline / Bonus</div>
+                <div class="stat-grid">
+                  <div class="stat-item"><span class="stat-label" title="Yellow cards received">Yellow Cards</span><span class="stat-val">{{ s.yellows if s and s.yellows else 0 }}</span></div>
+                  <div class="stat-item"><span class="stat-label" title="Red cards received (direct or second yellow)">Red Cards</span><span class="stat-val">{{ s.reds if s and s.reds else 0 }}</span></div>
+                  <div class="stat-item"><span class="stat-label" title="An individual error that directly led to an opponent goal">Error → Goal</span><span class="stat-val">{{ s.elg if s and s.elg else 0 }}</span></div>
+                  <div class="stat-item"><span class="stat-label" title="Man of the Match award">MOTM</span><span class="stat-val">{{ s.motm if s and s.motm else 0 }}</span></div>
+                  <div class="stat-item">
+                    <span class="stat-label" title="Total minutes on the pitch. 1pt for 1-60 min, 2pts for 61+ min">Minutes Played</span>
+                    <span class="stat-val">{{ s.minutes if s and s.minutes else 0 }}
+                      <span class="stat-sub">({{ '2pts' if s and s.minutes and s.minutes >= 61 else '1pt' if s and s.minutes and s.minutes >= 1 else '0pts' }})</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="stat-group game-log-group">
+                <div class="stat-group-label game-log-toggle" onclick="event.stopPropagation(); toggleTeamGameLog('gl-{{ uid }}', '{{ player.player_name }}')">
+                  📋 Game Log <span class="game-log-arrow" id="gl-arrow-{{ uid }}">▾</span>
+                </div>
+                <div class="game-log-table-wrap" id="gl-{{ uid }}" data-player="{{ player.player_name }}" style="display:none"></div>
+              </div>
+
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state">No players set for GW{{ current_gw }} yet.</div>
+{% endif %}
+{% endmacro %}
+
+<!-- ── Plan Future Lineup macro (simpler table — no points, nothing played yet) -->
+{% macro plan_roster_table(players, gw, table_id) %}
+{% if players %}
+<div class="table-wrap">
+  <table class="data-table roster-table" id="{{ table_id }}">
+    <thead>
+      <tr>
+        <th style="text-align:left">Player</th>
+        <th style="text-align:left">Club</th>
+        <th>Slot</th>
+        <th style="text-align:left">Fixture</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for player in players %}
+        {% set pos = (player.position_slot or '')|upper %}
+        {% set pos_label = pos if pos in ('GK','DEF','MID','FW') else '' %}
+        {% set club = plan_club_map.get(player.player_name) %}
+        {% set kickoff = plan_kickoff_map.get(club) if club else None %}
+        {% set opp = plan_opponent_map.get(club) if club else None %}
+        {% set eligible = plan_eligibility_map.get(player.player_name) %}
+        {% set player_locked = plan_locked_map.get(player.player_name, False) %}
+        {% set starter_locked = plan_gw_locked or (player_locked and player.slot_type == 'starter') %}
+        {% set starter_options_locked = plan_gw_locked or player_locked %}
+        <tr>
+          <td style="text-align:left;font-weight:600">{{ player.player_name }}</td>
+          <td style="text-align:left">
+            {% if club and badges.get(club) %}<img src="{{ badges[club] }}" class="club-badge" />{% endif %}
+            {{ club or '—' }}
+          </td>
+          <td>
+            <select class="slot-select pos-{{ pos_label if pos_label else 'BENCH' }}"
+                    data-player="{{ player.player_name }}"
+                    data-manager="{{ manager.id }}"
+                    data-gw="{{ gw }}"
+                    {% if starter_locked %}disabled{% endif %}
+                    {% if player_locked or plan_gw_locked %}title="🔒 {% if plan_gw_locked %}GW{{ gw }} is locked{% else %}Locked — match already kicked off{% endif %}"{% endif %}
+                    onchange="updateSlot(this)">
+              <optgroup label="Starting XI">
+                {% if not eligible or 'FW' in eligible %}
+                <option value="FW|starter"  {% if player.slot_type=='starter' and pos_label=='FW'  %}selected{% endif %} {% if starter_options_locked %}disabled{% endif %}>Forward</option>
+                {% endif %}
+                {% if not eligible or 'MID' in eligible %}
+                <option value="MID|starter" {% if player.slot_type=='starter' and pos_label=='MID' %}selected{% endif %} {% if starter_options_locked %}disabled{% endif %}>Midfielder</option>
+                {% endif %}
+                {% if not eligible or 'DEF' in eligible %}
+                <option value="DEF|starter" {% if player.slot_type=='starter' and pos_label=='DEF' %}selected{% endif %} {% if starter_options_locked %}disabled{% endif %}>Defender</option>
+                {% endif %}
+                {% if not eligible or 'GK' in eligible %}
+                <option value="GK|starter"  {% if player.slot_type=='starter' and pos_label=='GK'  %}selected{% endif %} {% if starter_options_locked %}disabled{% endif %}>Goalkeeper</option>
+                {% endif %}
+              </optgroup>
+              <option value="bench|bench" {% if player.slot_type=='bench' %}selected{% endif %} {% if plan_gw_locked %}disabled{% endif %}>Bench</option>
+              <option value="ir|ir"       {% if player.slot_type=='ir'    %}selected{% endif %} {% if plan_gw_locked %}disabled{% endif %}>Injury Reserve</option>
+            </select>
+            {% if player_locked or plan_gw_locked %}<span class="lock-icon" title="{% if plan_gw_locked %}GW{{ gw }} is locked{% else %}Locked — match already kicked off{% endif %}">🔒</span>{% endif %}
+          </td>
+          <td style="text-align:left">
+            {% if not club or not opp %}—
+            {% else %}
+              {% if badges.get(opp) %}<img src="{{ badges[opp] }}" class="club-badge" />{% endif %}
+              vs {{ opp }}
+              {% if kickoff and kickoff[0] %}<br><span class="fixture-time">{{ kickoff[0] }}, {{ kickoff[1] }}</span>
+              {% else %}<br><span style="color:var(--text-muted)">date TBD</span>
+              {% endif %}
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state">No players.</div>
+{% endif %}
+{% endmacro %}
+
+<!-- ── Starting XI ───────────────────────────────────────────────────────── -->
+<section class="section">
+  <h3 class="section-title">⚽ Starting XI — GW{{ current_gw }}
+    <span class="pts-note">Points calculated by the scoring engine — 0.00 until real match data is scraped</span>
+  </h3>
+
+  <div class="formation-summary" id="formation-summary">
+    <span class="formation-item" data-pos="FW">FW: <strong id="count-FW">0</strong>/2</span>
+    <span class="formation-item" data-pos="MID">MID: <strong id="count-MID">0</strong>/4</span>
+    <span class="formation-item" data-pos="DEF">DEF: <strong id="count-DEF">0</strong>/4</span>
+    <span class="formation-item" data-pos="GK">GK: <strong id="count-GK">0</strong>/1</span>
+  </div>
+
+  {% if not position_check.ok %}
+  <div class="lineup-warning">
+    ⚠️ Your lineup for GW{{ current_gw }} doesn't have the right number of starters —
+    {% for pos, info in position_check.positions.items() %}
+      {% if info.count != info.target %}{{ pos }}: {{ info.count }}/{{ info.target }}{% if info.count < info.target %} (need {{ info.target - info.count }} more){% else %} ({{ info.count - info.target }} too many){% endif %}{% if not loop.last %}, {% endif %}{% endif %}
+    {% endfor %}
+    — you won't receive full stats for this gameweek unless it's corrected{% if not gw_locked %} before it locks{% endif %}.
+  </div>
+  {% endif %}
+
+  {{ roster_table(starters, True, 's', 'table-starters') }}
+</section>
+
+<!-- ── Bench ─────────────────────────────────────────────────────────────── -->
+<section class="section">
+  <h3 class="section-title">🪑 Bench</h3>
+  {{ roster_table(bench, False, 'b', 'table-bench') }}
+</section>
+
+{% if ir %}
+<section class="section">
+  <h3 class="section-title">🏥 Injury Reserve</h3>
+  {{ roster_table(ir, False, 'ir', 'table-ir') }}
+</section>
+{% endif %}
+
+<!-- ── Plan Future Lineup ───────────────────────────────────────────────── -->
+{% if future_gws %}
+<section class="section">
+  <h3 class="section-title">🗓️ Plan Future Lineup
+    <span class="pts-note">Pre-set slots for a later gameweek — useful if you won't have access to update your roster closer to it</span>
+  </h3>
+
+  <div class="team-switcher" style="margin-bottom:14px">
+    <label class="gw-jump-label">Gameweek:</label>
+    <select class="gw-jump-select" onchange="location.href='/team/{{ manager.id }}?plan_gw='+this.value">
+      {% for g in future_gws %}
+      <option value="{{ g }}" {% if g == plan_gw %}selected{% endif %}>GW{{ g }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  {% if plan_position_check and not plan_position_check.ok %}
+  <div class="lineup-warning">
+    ⚠️ Your planned lineup for GW{{ plan_gw }} doesn't have the right number of starters —
+    {% for pos, info in plan_position_check.positions.items() %}
+      {% if info.count != info.target %}{{ pos }}: {{ info.count }}/{{ info.target }}{% if info.count < info.target %} (need {{ info.target - info.count }} more){% else %} ({{ info.count - info.target }} too many){% endif %}{% if not loop.last %}, {% endif %}{% endif %}
+    {% endfor %}
+    — it won't receive full stats for GW{{ plan_gw }} unless corrected before it locks.
+  </div>
+  {% endif %}
+
+  <h4 style="margin:16px 0 6px">Starting XI</h4>
+  {{ plan_roster_table(plan_starters, plan_gw, 'plan-table-starters') }}
+
+  <h4 style="margin:16px 0 6px">Bench</h4>
+  {{ plan_roster_table(plan_bench, plan_gw, 'plan-table-bench') }}
+
+  {% if plan_ir %}
+  <h4 style="margin:16px 0 6px">Injury Reserve</h4>
+  {{ plan_roster_table(plan_ir, plan_gw, 'plan-table-ir') }}
+  {% endif %}
+</section>
+{% endif %}
+
+<script src="{{ url_for('static', filename='js/game_log.js') }}"></script>
+<script>
+function toggleAccordion(id) {
+  const row = document.getElementById(id);
+  if (!row) return;
+  const isOpen = row.style.display !== 'none';
+  row.style.display = isOpen ? 'none' : 'table-row';
+  const playerRow = row.previousElementSibling;
+  const arrow = playerRow ? playerRow.querySelector('.accordion-toggle') : null;
+  if (arrow) arrow.textContent = isOpen ? '▾' : '▴';
+}
+
+function toggleAll(tableId) {
+  const table = document.getElementById(tableId);
+  if (!table) return;
+  const rows = table.querySelectorAll('.accordion-row');
+  const anyOpen = Array.from(rows).some(r => r.style.display !== 'none');
+  rows.forEach(row => {
+    row.style.display = anyOpen ? 'none' : 'table-row';
+    const playerRow = row.previousElementSibling;
+    const arrow = playerRow ? playerRow.querySelector('.accordion-toggle') : null;
+    if (arrow) arrow.textContent = anyOpen ? '▾' : '▴';
+  });
+}
+
+async function toggleTeamGameLog(id, playerName) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const isOpen = el.style.display !== 'none';
+  el.style.display = isOpen ? 'none' : 'block';
+  const arrow = document.getElementById('gl-arrow-' + id.replace('gl-', ''));
+  if (arrow) arrow.textContent = isOpen ? '▾' : '▴';
+
+  if (!isOpen) {
+    el.id = el.id || id;
+    const hidden = localStorage.getItem('hide2025') === 'true';
+    await loadPlayerHistory(playerName, el, hidden);
+  }
+}
+
+function applyHide2025(hidden) {
+  const btn = document.getElementById('toggle-2025-btn');
+  if (btn) btn.textContent = hidden ? 'Show 2025–26 stats' : 'Hide 2025–26 stats';
+
+  // Re-render any already-loaded game log panels with the new filter.
+  Object.keys(historyDataCache).forEach(name => {
+    document.querySelectorAll(`.game-log-table-wrap[data-player="${CSS.escape(name)}"]`).forEach(panel => {
+      panel.innerHTML = renderHistoryTable(historyDataCache[name], hidden, panel.id);
+      initGameLogSort(panel.id);
+    });
+  });
+}
+
+function toggle2025() {
+  const hidden = localStorage.getItem('hide2025') !== 'true';
+  localStorage.setItem('hide2025', hidden);
+  applyHide2025(hidden);
+}
+
+applyHide2025(localStorage.getItem('hide2025') === 'true');
+
+// ── Lineup editing ─────────────────────────────────────────────────────────
+async function updateSlot(selectEl) {
+  const [position_slot, slot_type] = selectEl.value.split('|');
+  const player_name = selectEl.dataset.player;
+  const manager_id  = selectEl.dataset.manager;
+  const gw          = selectEl.dataset.gw;
+
+  selectEl.disabled = true;
+
+  try {
+    const res = await fetch('/api/roster/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ manager_id, player_name, gw, slot_type, position_slot })
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      alert('Could not save change: ' + (data.error || 'unknown error'));
+      selectEl.disabled = false;
+      return;
+    }
+
+    // A slot change touches server-computed state (formation counts, lock
+    // status, position warnings) that isn't worth re-deriving in JS, so we
+    // still do a full reload — just remember where we were first so it
+    // doesn't feel like it's yanking you back to the top of the page.
+    sessionStorage.setItem('teamPageScrollY', window.scrollY);
+    window.location.reload();
+
+  } catch (e) {
+    alert('Network error saving change — please try again.');
+    selectEl.disabled = false;
+  }
+}
+
+(function restoreScrollPositionAfterSlotChange() {
+  const saved = sessionStorage.getItem('teamPageScrollY');
+  if (saved !== null) {
+    sessionStorage.removeItem('teamPageScrollY');
+    window.scrollTo(0, parseInt(saved, 10));
+  }
+})();
+
+// ── Formation summary (Starting XI only) ────────────────────────────────────
+function updateFormationSummary() {
+  const counts = { FW: 0, MID: 0, DEF: 0, GK: 0 };
+  document.querySelectorAll('#table-starters .slot-select').forEach(sel => {
+    const [pos, slotType] = sel.value.split('|');
+    if (slotType === 'starter' && counts.hasOwnProperty(pos)) {
+      counts[pos]++;
+    }
+  });
+
+  const targets = { FW: 2, MID: 4, DEF: 4, GK: 1 };
+  Object.keys(counts).forEach(pos => {
+    const el = document.getElementById('count-' + pos);
+    if (el) el.textContent = counts[pos];
+    const item = document.querySelector(`.formation-item[data-pos="${pos}"]`);
+    if (item) {
+      item.classList.toggle('formation-ok', counts[pos] === targets[pos]);
+      item.classList.toggle('formation-bad', counts[pos] !== targets[pos]);
+    }
+  });
+}
+
+document.addEventListener('DOMContentLoaded', updateFormationSummary);
+
+// ── Team name editing ────────────────────────────────────────────────────
+const MANAGER_ID = {{ manager.id }};
+
+function startEditTeamName() {
+  document.getElementById('team-name-display').style.display = 'none';
+  document.querySelector('.edit-pencil-btn').style.display = 'none';
+  document.getElementById('team-name-input').style.display = '';
+  document.getElementById('save-team-name-btn').style.display = '';
+  document.getElementById('cancel-team-name-btn').style.display = '';
+  document.getElementById('team-name-input').focus();
+}
+
+function cancelEditTeamName() {
+  document.getElementById('team-name-input').value = document.getElementById('team-name-display').textContent;
+  document.getElementById('team-name-display').style.display = '';
+  document.querySelector('.edit-pencil-btn').style.display = '';
+  document.getElementById('team-name-input').style.display = 'none';
+  document.getElementById('save-team-name-btn').style.display = 'none';
+  document.getElementById('cancel-team-name-btn').style.display = 'none';
+}
+
+async function saveTeamName() {
+  const newName = document.getElementById('team-name-input').value.trim();
+  if (!newName) { alert('Team name cannot be empty.'); return; }
+
+  const res = await fetch('/api/manager/rename', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ manager_id: MANAGER_ID, team_name: newName })
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    alert(data.error || 'Could not rename team.');
+    return;
+  }
+  window.location.reload();
+}
+
+// ── Team photo upload ────────────────────────────────────────────────────
+async function uploadPhoto(file) {
+  if (!file) return;
+  const formData = new FormData();
+  formData.append('manager_id', MANAGER_ID);
+  formData.append('photo', file);
+
+  const res = await fetch('/api/manager/photo', { method: 'POST', body: formData });
+  const data = await res.json();
+  if (!res.ok) {
+    alert(data.error || 'Could not upload photo.');
+    return;
+  }
+  window.location.reload();
+}
+
+// ── Avatar menu (view / change photo) ────────────────────────────────────
+function toggleAvatarMenu(e) {
+  e.stopPropagation();
+  const menu = document.getElementById('avatar-menu');
+  menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+}
+
+document.addEventListener('click', () => {
+  const menu = document.getElementById('avatar-menu');
+  if (menu) menu.style.display = 'none';
+});
+
+function viewPhoto() {
+  const img = document.getElementById('team-avatar-img');
+  if (!img) return;
+  document.getElementById('avatar-menu').style.display = 'none';
+  document.getElementById('photo-lightbox-img').src = img.dataset.full;
+  document.getElementById('photo-lightbox').style.display = 'flex';
+}
+
+function closePhotoLightbox() {
+  document.getElementById('photo-lightbox').style.display = 'none';
+}
+</script>
+
+{% endblock %}
