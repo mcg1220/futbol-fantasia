@@ -3426,6 +3426,14 @@ def auto_scrape_trigger():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/healthz')
+def healthz():
+    # No DB/scraper checks here on purpose — Render hits this every few
+    # seconds and a slow query or a scrape in progress shouldn't make it
+    # think the whole service is down and restart it.
+    return jsonify({"status": "ok"})
+
+
 if __name__ == '__main__':
     # Only matters when running `python app.py` directly (local dev, or a
     # manual run on a host) — gunicorn (how this is actually served once
