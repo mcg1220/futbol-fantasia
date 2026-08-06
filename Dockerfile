@@ -18,9 +18,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install --with-deps chromium
 
 COPY . .
+RUN chmod +x entrypoint.sh
 
 ENV PORT=5000
 EXPOSE 5000
+
+# entrypoint.sh symlinks data/ and static/uploads/ onto the host's single
+# persistent disk (mounted at /var/data) before handing off to gunicorn —
+# see that file for why.
+ENTRYPOINT ["./entrypoint.sh"]
 
 # Two workers: enough headroom for 8-10 managers hitting the app
 # occasionally, while staying small enough to keep SQLite write contention
