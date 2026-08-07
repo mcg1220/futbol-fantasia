@@ -1685,7 +1685,9 @@ def history():
     managers = c.execute(
         "SELECT id, name, team_name FROM managers ORDER BY name"
     ).fetchall()
-    as_manager_id = request.args.get('as_manager', type=int)
+    # "Managing as" used to be a dropdown anyone could switch — now it's
+    # always the logged-in identity (or None if browsing without a session).
+    as_manager_id = current_manager_id()
 
     totals_2025 = calc_bulk_season_totals(conn, '2025-26', match_id_filter=(0, SEASON_CUTOFF))
     totals_2026 = calc_bulk_season_totals(conn, '2026-27', match_id_filter=(SEASON_CUTOFF, 9_999_999))

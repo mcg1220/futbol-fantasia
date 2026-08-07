@@ -4,31 +4,19 @@ let feedPosts = INITIAL_POSTS.slice();
 let editingPostId = null;
 
 function getMemeManagerId() {
-  return document.getElementById('meme-as-manager').value;
+  return CURRENT_MANAGER_ID;
 }
 function getMemeManagerName() {
-  const id = getMemeManagerId();
-  const m = MANAGERS.find(mg => String(mg.id) === String(id));
-  return m ? m.name : '';
+  return CURRENT_MANAGER_NAME || '';
 }
 function requireMemeManager() {
   const id = getMemeManagerId();
   if (!id) {
-    alert('Select who you\'re posting as first.');
+    alert('Log in first to post.');
     return null;
   }
   return id;
 }
-function onMemeManagerChange() {
-  localStorage.setItem('memeAsManager', getMemeManagerId());
-}
-(function restoreMemeManager() {
-  const saved = localStorage.getItem('memeAsManager');
-  if (saved) {
-    const sel = document.getElementById('meme-as-manager');
-    if (Array.from(sel.options).some(o => o.value === saved)) sel.value = saved;
-  }
-})();
 
 function closeModal(id) {
   document.getElementById(id).style.display = 'none';

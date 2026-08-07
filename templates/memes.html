@@ -9,20 +9,6 @@
   </p>
 
   <div class="table-wrap" style="padding:16px 20px;margin-top:16px;margin-bottom:16px">
-    <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
-      <div style="display:flex;flex-direction:column;gap:6px">
-        <label class="gw-jump-label">Posting as</label>
-        <select id="meme-as-manager" class="gw-jump-select" style="width:220px" onchange="onMemeManagerChange()">
-          <option value="">— Select manager —</option>
-          {% for m in managers %}
-          <option value="{{ m.id }}">{{ m.name }} ({{ m.team_name }})</option>
-          {% endfor %}
-        </select>
-      </div>
-    </div>
-  </div>
-
-  <div class="table-wrap" style="padding:16px 20px;margin-bottom:16px">
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button type="button" class="action-btn" onclick="openUploadComposer()">🖼️ Upload Image/GIF</button>
       <button type="button" class="action-btn" onclick="openLinkComposer()">🔗 Paste a Link</button>
@@ -160,6 +146,8 @@
 <script async src="https://platform.twitter.com/widgets.js"></script>
 <script>
 const MANAGERS = {{ managers|tojson }};
+const CURRENT_MANAGER_ID = {{ current_manager_id|tojson }};
+const CURRENT_MANAGER_NAME = {{ current_manager_name|tojson }};
 const INITIAL_POSTS = {{ posts|tojson }};
 let HAS_MORE = {{ has_more|tojson }};
 const EMOJI_PALETTE = ['👍', '😂', '🔥', '💀', '❤️', '🎉'];

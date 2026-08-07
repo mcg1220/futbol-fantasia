@@ -85,13 +85,6 @@
       <div class="table-wrap" style="padding:20px">
         <h3 style="margin-top:0">Propose a Journalist</h3>
         <div style="display:flex;flex-direction:column;gap:8px">
-          <label class="gw-jump-label">Proposed by</label>
-          <select id="jn-proposer" class="gw-jump-select">
-            <option value="">— Select manager —</option>
-            {% for m in managers %}
-            <option value="{{ m.name }}">{{ m.name }} ({{ m.team_name }})</option>
-            {% endfor %}
-          </select>
           <input type="text" id="jn-name" class="player-search-input" placeholder="Name" />
           <input type="text" id="jn-handle" class="player-search-input" placeholder="X handle (no @)" />
           <input type="text" id="jn-notes" class="player-search-input" placeholder="Why do you trust them?" />
@@ -111,19 +104,18 @@ async function proposeJournalist() {
   const errEl = document.getElementById('jn-error');
   errEl.style.display = 'none';
 
-  const proposed_by = document.getElementById('jn-proposer').value;
   const name = document.getElementById('jn-name').value.trim();
   const x_handle = document.getElementById('jn-handle').value.trim();
   const notes = document.getElementById('jn-notes').value.trim();
-  if (!proposed_by || !name || !x_handle) {
-    errEl.textContent = 'Proposer, name, and X handle are required.';
+  if (!name || !x_handle) {
+    errEl.textContent = 'Name and X handle are required.';
     errEl.style.display = 'block';
     return;
   }
 
   const res = await fetch('/transfers/journalists/propose', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ name, x_handle, notes, proposed_by })
+    body: JSON.stringify({ name, x_handle, notes })
   });
   const data = await res.json();
   if (!res.ok) {

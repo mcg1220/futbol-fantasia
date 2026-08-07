@@ -25,15 +25,6 @@
     </div>
     {% endif %}
     <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
-      <div style="display:flex;flex-direction:column;gap:6px">
-        <label class="gw-jump-label">Managing as</label>
-        <select id="as-manager-select" class="gw-jump-select" style="width:200px" onchange="onManagerChange(this.value)">
-          <option value="">— Browse only —</option>
-          {% for m in managers %}
-          <option value="{{ m.id }}" {% if as_manager_id == m.id %}selected{% endif %}>{{ m.name }} ({{ m.team_name }})</option>
-          {% endfor %}
-        </select>
-      </div>
       <div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:200px">
         <label class="gw-jump-label">Search all players</label>
         <input type="text" class="player-search-input" placeholder="Filter by name or club..." oninput="applyFilters()" id="player-search" />
@@ -133,7 +124,7 @@
     {% endif %}
     {% if not as_manager_id %}
     <div class="table-wrap" style="padding:28px;text-align:center;color:var(--text-secondary)">
-      Pick a manager under "Managing as" on the Browse tab to see their claims.
+      <a href="/login">Log in</a> to see your claims.
     </div>
     {% elif not waiver_window %}
     <div class="table-wrap" style="padding:28px;text-align:center;color:var(--text-secondary)">
@@ -295,6 +286,7 @@
 <script src="{{ url_for('static', filename='js/roster_picker.js') }}"></script>
 <script>
 const CURRENT_GW = {{ current_gw }};
+const CURRENT_MANAGER_ID = {{ current_manager_id|tojson }};
 
 const TABS = ['browse', 'myclaims', 'waiverorder', 'waiverresults', 'transactions'];
 function showTab(name) {
@@ -306,13 +298,6 @@ function showTab(name) {
 }
 
 showTab(TABS.includes(localStorage.getItem('activeTab')) ? localStorage.getItem('activeTab') : 'browse');
-
-function onManagerChange(val) {
-  const url = new URL(window.location);
-  if (val) url.searchParams.set('as_manager', val);
-  else url.searchParams.delete('as_manager');
-  window.location = url;
-}
 
 function applyHide2025(hidden) {
   document.querySelectorAll('.col-2025').forEach(el => {
@@ -417,9 +402,9 @@ async function openDropModal(playerName, mode, title) {
   rosterDiv.innerHTML = 'Loading roster...';
   document.getElementById('drop-modal').style.display = 'flex';
 
-  const managerId = document.getElementById('as-manager-select').value;
+  if (!CURRENT_MANAGER_ID) { alert('Log in first.'); return; }
   try {
-    const res = await fetch(`/api/manager/${managerId}/roster`);
+    const res = await fetch(`/api/manager/${CURRENT_MANAGER_ID}/roster`);
     const roster = await res.json();
     rosterDiv.innerHTML = renderRosterPicker(roster) || '<div class="empty-state">No roster players found.</div>';
   } catch (e) {
@@ -443,11 +428,10 @@ function closeDropModal() {
 
 async function confirmSwap(dropPlayer) {
   try {
-    const managerId = document.getElementById('as-manager-select').value;
     const url = pendingMode === 'claim' ? '/api/waiver/claim' : '/api/roster/swap';
     const body = pendingMode === 'claim'
-      ? { manager_id: parseInt(managerId), add_player: pendingAdd, drop_player: dropPlayer, gw: CURRENT_GW }
-      : { manager_id: parseInt(managerId), drop_player: dropPlayer, add_player: pendingAdd, gw: CURRENT_GW };
+      ? { add_player: pendingAdd, drop_player: dropPlayer, gw: CURRENT_GW }
+      : { drop_player: dropPlayer, add_player: pendingAdd, gw: CURRENT_GW };
 
     const res = await fetch(url, {
       method: 'POST',
