@@ -28,9 +28,11 @@ EXPOSE 5000
 # see that file for why.
 ENTRYPOINT ["./entrypoint.sh"]
 
-# Two workers: enough headroom for 8-10 managers hitting the app
-# occasionally, while staying small enough to keep SQLite write contention
-# low — each gunicorn worker is a separate process, so more workers means
-# more chances of two writes landing at the same instant even with WAL
-# mode's improved concurrency.
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "120", "app:app"]
+# One worker: Render's own sizing guidance for this instance (512MB RAM)
+# already says WEB_CONCURRENCY=1, and the scraper's headless Chromium is
+# memory-hungry enough on its own that a second full copy of the app
+# loaded in a second worker process pushed a live run over the limit and
+# OOM-crashed the container. 8 occasional users don't need a second
+# worker for responsiveness — the scraper runs in a background thread
+# either way, so it was never blocking other requests.
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--timeout", "120", "app:app"]
