@@ -82,7 +82,7 @@ def log_audit(conn, manager_id, entity_type, action, summary, detail=None):
         INSERT INTO audit_log (manager_id, actor_name, entity_type, action, summary, detail_json, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
     """, (manager_id, actor_name or 'Unknown', entity_type, action, summary,
-          json.dumps(detail) if detail else None, datetime.now().isoformat()))
+          json.dumps(detail) if detail else None, now_eastern_naive().isoformat()))
 
 
 def load_badges():
@@ -473,7 +473,7 @@ def propose_transfer_journalist():
     conn.execute("""
         INSERT INTO transfer_journalists (name, x_handle, notes, added_at, status, proposed_by)
         VALUES (?, ?, ?, ?, 'pending', ?)
-    """, (name, x_handle, notes, datetime.now().isoformat(), proposed_by))
+    """, (name, x_handle, notes, now_eastern_naive().isoformat(), proposed_by))
     conn.commit()
     conn.close()
     return jsonify({"status": "ok"})
@@ -484,7 +484,7 @@ def approve_transfer_journalist(journalist_id):
     conn = get_db()
     conn.execute("""
         UPDATE transfer_journalists SET status='active', reviewed_at=? WHERE id=?
-    """, (datetime.now().isoformat(), journalist_id))
+    """, (now_eastern_naive().isoformat(), journalist_id))
     conn.commit()
     conn.close()
     return jsonify({"status": "ok"})
@@ -500,7 +500,7 @@ def reject_transfer_journalist(journalist_id):
     conn = get_db()
     conn.execute("""
         UPDATE transfer_journalists SET status='rejected', review_note=?, reviewed_at=? WHERE id=?
-    """, (reason, datetime.now().isoformat(), journalist_id))
+    """, (reason, now_eastern_naive().isoformat(), journalist_id))
     conn.commit()
     conn.close()
     return jsonify({"status": "ok"})
@@ -788,7 +788,7 @@ def create_meme_post():
         conn.close()
         return jsonify({"error": "Manager not found"}), 404
 
-    now = datetime.now().isoformat()
+    now = now_eastern_naive().isoformat()
 
     if image_file and image_file.filename:
         image_path, err = _save_meme_image_file(image_file)
@@ -828,7 +828,7 @@ def edit_meme_post(post_id):
         conn.close()
         return jsonify({"error": "Only the original poster can edit this post"}), 403
 
-    now = datetime.now().isoformat()
+    now = now_eastern_naive().isoformat()
     updates = {'caption': caption if caption is not None else post['caption'], 'updated_at': now}
 
     if post['post_type'] == 'image' and image_file and image_file.filename:
@@ -897,7 +897,7 @@ def react_to_meme_post(post_id):
     else:
         conn.execute("""
             INSERT INTO meme_reactions (post_id, manager_id, emoji, created_at) VALUES (?, ?, ?, ?)
-        """, (post_id, manager_id, emoji, datetime.now().isoformat()))
+        """, (post_id, manager_id, emoji, now_eastern_naive().isoformat()))
         toggled_on = True
 
     conn.commit()
@@ -916,7 +916,7 @@ def comment_on_meme_post(post_id):
     conn = get_db()
     conn.execute("""
         INSERT INTO meme_comments (post_id, manager_id, body, created_at) VALUES (?, ?, ?, ?)
-    """, (post_id, manager_id, body, datetime.now().isoformat()))
+    """, (post_id, manager_id, body, now_eastern_naive().isoformat()))
     conn.commit()
     new_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()['id']
     manager = conn.execute("SELECT name FROM managers WHERE id=?", (manager_id,)).fetchone()
@@ -1792,7 +1792,7 @@ def execute_roster_swap(conn, manager_id, add_player, drop_player, gw, source):
     c.execute("""
         INSERT INTO transactions (manager_id, added_player, dropped_player, source, gw, season, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (manager_id, add_player, drop_player, source, gw, DRAFT_SEASON, datetime.now().isoformat()))
+    """, (manager_id, add_player, drop_player, source, gw, DRAFT_SEASON, now_eastern_naive().isoformat()))
 
     # Transfer-draft picks log their own richer entry (round/draft type) at
     # the call site, since a pass there never reaches this function at all —
@@ -1941,7 +1941,7 @@ def waiver_open():
 
         conn.execute(
             "INSERT INTO waiver_windows (season, window_number, gw, status, opened_at) VALUES (?, ?, ?, 'open', ?)",
-            (season, next_num, gw, datetime.now().isoformat())
+            (season, next_num, gw, now_eastern_naive().isoformat())
         )
         log_audit(conn, None, 'waiver', 'open_window', f"Opened waiver window #{next_num} (GW{gw})")
         conn.commit()
@@ -2002,7 +2002,7 @@ def waiver_claim():
         conn.execute("""
             INSERT INTO waiver_claims (window_id, manager_id, add_player, drop_player, priority, status, created_at)
             VALUES (?, ?, ?, ?, ?, 'pending', ?)
-        """, (window['id'], manager_id, add_player, drop_player, next_priority, datetime.now().isoformat()))
+        """, (window['id'], manager_id, add_player, drop_player, next_priority, now_eastern_naive().isoformat()))
         log_audit(conn, manager_id, 'waiver', 'claim_submitted',
                   f"Submitted waiver claim: add {add_player}, drop {drop_player}",
                   {"add_player": add_player, "drop_player": drop_player, "gw": gw})
@@ -2201,7 +2201,7 @@ def waiver_process():
 
         conn.execute(
             "UPDATE waiver_windows SET status='complete', closed_at=? WHERE id=?",
-            (datetime.now().isoformat(), window['id'])
+            (now_eastern_naive().isoformat(), window['id'])
         )
         conn.commit()
         return jsonify({"status": "ok", "processed": sequence})
@@ -2567,7 +2567,7 @@ def draft_pick():
                                   player_name, slot_type, position_slot, picked_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (DRAFT_SEASON, overall_pick, round_num, pick_in_round, manager_id,
-          player_name, slot_type, position_slot, datetime.now().isoformat()))
+          player_name, slot_type, position_slot, now_eastern_naive().isoformat()))
 
     conn.execute("""
         INSERT INTO rosters (manager_id, player_name, slot_type, position_slot, gw_start, gw_end)
@@ -2624,7 +2624,7 @@ def draft_claim_token():
                                   player_name, slot_type, position_slot, picked_at)
         VALUES (?, ?, ?, ?, ?, ?, 'token', NULL, ?)
     """, (DRAFT_SEASON, overall_pick, round_num, pick_in_round, manager_id,
-          f"⚡ Summer Transfer #{token_number}", datetime.now().isoformat()))
+          f"⚡ Summer Transfer #{token_number}", now_eastern_naive().isoformat()))
 
     next_pick = overall_pick + 1
     new_status = 'complete' if next_pick > DRAFT_TOTAL_PICKS else 'in_progress'
@@ -2786,7 +2786,7 @@ def draft_comment():
     conn.execute("""
         INSERT INTO draft_comments (season, target_type, target_id, author_name, comment, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
-    """, (DRAFT_SEASON, target_type, target_id, author_name, comment, datetime.now().isoformat()))
+    """, (DRAFT_SEASON, target_type, target_id, author_name, comment, now_eastern_naive().isoformat()))
     conn.commit()
     conn.close()
     return jsonify({"status": "ok"})
@@ -2917,7 +2917,7 @@ def transfer_pool_add(draft_type):
             VALUES (?,?,?,?,?,?)
             ON CONFLICT(season, draft_type, player_name) DO UPDATE SET
                 previous_club=COALESCE(excluded.previous_club, transfer_pool.previous_club)
-        """, (DRAFT_SEASON, draft_type, player_name, previous_club, added_by, datetime.now().isoformat()))
+        """, (DRAFT_SEASON, draft_type, player_name, previous_club, added_by, now_eastern_naive().isoformat()))
         log_audit(conn, None, 'transfer_draft', 'pool_add',
                   f"Added {player_name} to the {draft_type} transfer pool (by {added_by or 'unknown'})")
         conn.commit()
@@ -2977,7 +2977,7 @@ def transfer_pool_add_new(draft_type):
         conn.execute("""
             INSERT OR IGNORE INTO transfer_pool (season, draft_type, player_name, added_by, added_at)
             VALUES (?,?,?,?,?)
-        """, (DRAFT_SEASON, draft_type, player_name, added_by, datetime.now().isoformat()))
+        """, (DRAFT_SEASON, draft_type, player_name, added_by, now_eastern_naive().isoformat()))
         log_audit(conn, None, 'transfer_draft', 'pool_add_new',
                   f"Created new player {player_name} ({club}, {position}) and added to the {draft_type} transfer pool (by {added_by or 'unknown'})")
         conn.commit()
@@ -3070,7 +3070,7 @@ def transfer_draft_start(draft_type):
 
         conn.execute(
             "UPDATE transfer_drafts SET status='in_progress', round=1, current_pick_number=1, started_at=? WHERE id=?",
-            (datetime.now().isoformat(), draft['id'])
+            (now_eastern_naive().isoformat(), draft['id'])
         )
         log_audit(conn, None, 'transfer_draft', 'start', f"Started the {draft_type} transfer draft")
         conn.commit()
@@ -3094,7 +3094,7 @@ def transfer_draft_advance(conn, draft):
     else:
         new_round, new_pick, new_status = draft['round'], next_pick, 'in_progress'
 
-    completed_at = datetime.now().isoformat() if new_status == 'complete' else None
+    completed_at = now_eastern_naive().isoformat() if new_status == 'complete' else None
     conn.execute(
         "UPDATE transfer_drafts SET round=?, current_pick_number=?, status=?, completed_at=COALESCE(?, completed_at) WHERE id=?",
         (new_round, new_pick, new_status, completed_at, draft['id'])
@@ -3138,7 +3138,7 @@ def transfer_draft_pick(draft_type):
         conn.execute("""
             INSERT INTO transfer_draft_picks (transfer_draft_id, round, overall_pick, manager_id, player_name, dropped_player, is_pass, picked_at)
             VALUES (?,?,?,?,?,?,0,?)
-        """, (draft['id'], draft['round'], overall_pick, manager_id, player_name, dropped_player, datetime.now().isoformat()))
+        """, (draft['id'], draft['round'], overall_pick, manager_id, player_name, dropped_player, now_eastern_naive().isoformat()))
 
         if draft['round'] == 2:
             live_order = [r['manager_id'] for r in get_waiver_order(conn, season)]
@@ -3190,7 +3190,7 @@ def transfer_draft_pass(draft_type):
         conn.execute("""
             INSERT INTO transfer_draft_picks (transfer_draft_id, round, overall_pick, manager_id, player_name, dropped_player, is_pass, picked_at)
             VALUES (?,?,?,?,NULL,NULL,1,?)
-        """, (draft['id'], draft['round'], overall_pick, manager_id, datetime.now().isoformat()))
+        """, (draft['id'], draft['round'], overall_pick, manager_id, now_eastern_naive().isoformat()))
 
         transfer_draft_advance(conn, draft)
         log_audit(conn, manager_id, 'transfer_draft', 'pass',
