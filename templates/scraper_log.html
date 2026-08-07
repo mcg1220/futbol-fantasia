@@ -11,14 +11,29 @@
   {% if scraper_status.status == 'running' %}
   <div class="table-wrap" style="padding:14px 20px;margin-bottom:16px">
     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:10px">
-      <span>⏳ Scraper shows <strong>running</strong> since {{ scraper_status.started_at }}. If it's actually stuck (crashed without finishing), you can force it back to idle.</span>
+      <span>⏳ Scraper shows <strong>running</strong> since {{ scraper_status.started_at }}.</span>
+      <button type="button" class="action-btn" onclick="cancelScraper()">🛑 Cancel Scrape</button>
       <button type="button" class="action-btn" onclick="forceResetScraper()">⚠️ Force Reset</button>
+    </div>
+    <div style="font-size:0.85em;color:var(--text-secondary);margin-top:-4px;margin-bottom:10px">
+      <strong>Cancel</strong> actually stops the running scrape. <strong>Force Reset</strong> only clears this stuck-looking status — use it if the process already died on its own and just left this banner behind; it won't stop a scrape that's genuinely still running.
     </div>
     <div id="scraperProgressFeed" style="font-size:0.9em;color:var(--text-secondary);max-height:240px;overflow-y:auto;border-top:1px solid var(--border);padding-top:10px;line-height:1.7">
       Waiting for the first match to start...
     </div>
   </div>
   <script>
+    async function cancelScraper() {
+      if (!confirm('Stop the running scrape? This kills the in-progress run — anything not already saved is lost, and you\'ll need to start a fresh scrape afterward.')) return;
+      const res = await fetch('/api/scraper/cancel', { method: 'POST' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || 'Could not cancel the scrape.');
+        return;
+      }
+      window.location.reload();
+    }
+
     async function forceResetScraper() {
       if (!confirm('Force the scraper status back to idle? Only do this if you\'re sure no scrape is actually running.')) return;
       await fetch('/api/scraper/force-reset', { method: 'POST' });

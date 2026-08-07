@@ -5,6 +5,7 @@ import sqlite3
 import json
 import threading
 import subprocess
+import signal
 import time
 import uuid
 import random
@@ -350,7 +351,15 @@ def run_scraper_background(gw, started_at, trigger='manual'):
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
+            # Its own process group (not just its own process) so cancel can
+            # kill the whole tree in one shot — scrape_gw.py's Playwright
+            # browser is a child process that a plain kill of just the
+            # Python pid would leave orphaned and still running.
+            preexec_fn=os.setsid,
         )
+        status = read_scraper_status()
+        status["pid"] = proc.pid
+        write_scraper_status(status)
 
         def drain_stderr():
             for line in proc.stderr:
@@ -382,7 +391,12 @@ def run_scraper_background(gw, started_at, trigger='manual'):
 
         if returncode != 0:
             total = agg["total_fixtures"]
-            if total == 0:
+            if returncode < 0 and signal.Signals(-returncode) in (signal.SIGTERM, signal.SIGKILL):
+                # Negative returncode means the process died from a signal
+                # rather than exiting on its own — in this app the only
+                # thing that sends one is the cancel endpoint below.
+                error_msg = f"❌ Cancelled by request for GW{gw}."
+            elif total == 0:
                 stderr_tail = stderr_text.strip().splitlines()
                 reason = stderr_tail[-1] if stderr_tail else "no output — check server logs"
                 error_msg = f"Scraper crashed before producing results for GW{gw}: {reason}"
@@ -3354,6 +3368,30 @@ def scrape_status():
 def scraper_force_reset():
     write_scraper_status({"status": "idle", "started_at": None, "completed_at": None, "gw": None})
     return jsonify({"status": "ok"})
+
+
+@app.route('/api/scraper/cancel', methods=['POST'])
+def scraper_cancel():
+    """
+    Actually kills the running scrape, unlike force-reset (which only
+    clears the status file and leaves the process running underneath —
+    see force-reset above). Signals the whole process group so
+    scrape_gw.py's Playwright/Chromium child dies too, not just the
+    Python parent.
+    """
+    status = read_scraper_status()
+    if status.get('status') != 'running':
+        return jsonify({"error": "No scrape is currently running"}), 409
+    pid = status.get('pid')
+    if not pid:
+        return jsonify({"error": "No process recorded for this run — try force-reset instead"}), 409
+    try:
+        os.killpg(os.getpgid(pid), signal.SIGTERM)
+    except ProcessLookupError:
+        # Already dead — the background thread just hasn't finished
+        # writing the final status yet. Nothing left to kill.
+        pass
+    return jsonify({"status": "cancelling"})
 
 
 # ── Auto-scrape poller ──────────────────────────────────────────────────────
