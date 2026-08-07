@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Log in · Fútbol de Fantasía{% endblock %}
+
+{% block content %}
+<section class="section">
+  <h2 class="section-title">🔒 Log in</h2>
+  <p style="color:var(--text-secondary);margin-top:-8px">
+    Pick your name. First time here? You'll set a PIN — after that, just enter it.
+  </p>
+
+  <div class="table-wrap" style="padding:20px;max-width:420px">
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">
+      <label class="gw-jump-label">Manager</label>
+      <select id="login-manager-select" class="gw-jump-select" style="width:100%" onchange="onManagerChange()">
+        <option value="">— Select your name —</option>
+        {% for m in managers %}
+        <option value="{{ m.id }}" {% if selected_manager and selected_manager.id == m.id %}selected{% endif %}>
+          {{ m.name }} ({{ m.team_name }})
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    {% if selected_manager %}
+    <div id="login-pin-form" style="display:flex;flex-direction:column;gap:12px">
+      {% if needs_pin_setup %}
+      <p style="margin:0;font-size:0.9em;color:var(--text-secondary)">
+        No PIN set yet for <strong>{{ selected_manager.name }}</strong> — choose one now (4+ characters, anything you'll remember).
+      </p>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="gw-jump-label">New PIN</label>
+        <input type="password" id="login-pin" class="gw-jump-select" style="width:100%" autocomplete="new-password" />
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="gw-jump-label">Confirm PIN</label>
+        <input type="password" id="login-confirm-pin" class="gw-jump-select" style="width:100%" autocomplete="new-password" />
+      </div>
+      {% else %}
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="gw-jump-label">PIN for {{ selected_manager.name }}</label>
+        <input type="password" id="login-pin" class="gw-jump-select" style="width:100%" autocomplete="current-password" />
+      </div>
+      {% endif %}
+      <div id="login-error" style="color:var(--pl-magenta);font-size:0.9em;display:none"></div>
+      <button type="button" class="action-btn" onclick="submitLogin({{ needs_pin_setup|tojson }})">
+        {% if needs_pin_setup %}Set PIN &amp; log in{% else %}Log in{% endif %}
+      </button>
+    </div>
+    {% endif %}
+  </div>
+</section>
+
+<script>
+function onManagerChange() {
+  const id = document.getElementById('login-manager-select').value;
+  window.location.href = id ? `/login?manager_id=${id}` : '/login';
+}
+
+async function submitLogin(needsPinSetup) {
+  const managerId = document.getElementById('login-manager-select').value;
+  const pin = document.getElementById('login-pin').value;
+  const confirmPin = needsPinSetup ? document.getElementById('login-confirm-pin').value : undefined;
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+
+  const res = await fetch('/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ manager_id: managerId, pin, confirm_pin: confirmPin }),
+  });
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    errEl.textContent = data.error || 'Something went wrong.';
+    errEl.style.display = 'block';
+    return;
+  }
+  window.location.href = data.redirect || '/';
+}
+</script>
+{% endblock %}

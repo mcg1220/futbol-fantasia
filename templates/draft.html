@@ -123,15 +123,6 @@
   <div class="table-wrap" style="padding:20px;margin-top:16px">
     <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
       <div style="display:flex;flex-direction:column;gap:6px">
-        <label class="gw-jump-label">Picking as</label>
-        <select id="as-manager-select" class="gw-jump-select" style="width:200px">
-          <option value="">— Select manager —</option>
-          {% for m in managers %}
-          <option value="{{ m.id }}">{{ m.name }} ({{ m.team_name }})</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:6px">
         <label class="gw-jump-label">&nbsp;</label>
         <button type="button" class="action-btn" onclick="startTokenClaim()" title="Spend this pick on your Summer Transfer token instead of a player">⚡ Claim Summer Transfer Token</button>
       </div>
@@ -310,6 +301,8 @@
 const DRAFT_STATUS = "{{ state.status }}";
 const POSITION_TARGETS = {{ position_targets|tojson }};
 const MANAGERS = {{ managers|tojson }};
+const CURRENT_MANAGER_ID = {{ current_manager_id|tojson }};
+const CURRENT_MANAGER_NAME = {{ current_manager_name|tojson }};
 const CURRENT_GW = {{ current_gw }};
 const STAT_COLS = {{ stat_cols|tojson }};
 const ALL_PLAYER_NAMES = {{ all_player_names|tojson }};
@@ -455,23 +448,19 @@ async function togglePoolHistory(name) {
 let pendingAction = null;  // {type: 'player', name} | {type: 'token'}
 
 function startDraftPick(playerName) {
-  const managerId = document.getElementById('as-manager-select').value;
-  if (!managerId) { alert('Select who you are picking as first.'); return; }
+  if (!CURRENT_MANAGER_ID) { alert('Log in first to make a pick.'); return; }
   pendingAction = { type: 'player', name: playerName };
-  const managerName = MANAGERS.find(m => m.id == managerId).name;
   document.getElementById('confirm-modal-title').textContent = `Draft ${playerName}?`;
-  document.getElementById('confirm-modal-body').textContent = `${managerName} will select ${playerName} with this pick.`;
+  document.getElementById('confirm-modal-body').textContent = `${CURRENT_MANAGER_NAME} will select ${playerName} with this pick.`;
   document.getElementById('confirm-modal').style.display = 'flex';
 }
 
 function startTokenClaim() {
-  const managerId = document.getElementById('as-manager-select').value;
-  if (!managerId) { alert('Select who you are picking as first.'); return; }
+  if (!CURRENT_MANAGER_ID) { alert('Log in first to claim your token.'); return; }
   pendingAction = { type: 'token' };
-  const managerName = MANAGERS.find(m => m.id == managerId).name;
   document.getElementById('confirm-modal-title').textContent = 'Claim Summer Transfer Token?';
   document.getElementById('confirm-modal-body').textContent =
-    `${managerName} will spend this pick on a Summer Transfer token instead of a player. ` +
+    `${CURRENT_MANAGER_NAME} will spend this pick on a Summer Transfer token instead of a player. ` +
     `Token numbers are assigned in claim order — the next available number goes to you.`;
   document.getElementById('confirm-modal').style.display = 'flex';
 }
@@ -482,10 +471,9 @@ function closeConfirmModal() {
 }
 
 async function confirmDraftPick() {
-  const managerId = document.getElementById('as-manager-select').value;
   const action = pendingAction;
   const url = action.type === 'token' ? '/api/draft/claim_token' : '/api/draft/pick';
-  const body = { manager_id: parseInt(managerId) };
+  const body = {};
   if (action.type === 'player') body.player_name = action.name;
 
   const res = await fetch(url, {

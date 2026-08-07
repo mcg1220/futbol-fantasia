@@ -16,14 +16,28 @@ import urllib.error
 from html.parser import HTMLParser
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from werkzeug.utils import secure_filename
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 8 * 1024 * 1024  # 8MB upload cap (memes: images/GIFs + flattened canvas exports)
 # Falls back to a fixed local-dev value so `python app.py` still works with no
 # env vars set; every hosted deploy must set a real SECRET_KEY explicitly.
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-only-insecure-key-set-SECRET_KEY-in-production')
+
+# Login sessions: a signed cookie (via secret_key above), not a server-side
+# store — fine for 8 trusted friends where nothing sensitive is stored
+# beyond an integer manager id, and it avoids a sessions table + cleanup
+# job for a problem this app doesn't have. `permanent=True` (set at login,
+# below) plus this lifetime is what satisfies "don't make me log in every
+# time" — Flask refreshes the cookie's expiry on every response by default.
+app.permanent_session_lifetime = timedelta(days=90)
+# Secure cookies need HTTPS, which is only true once actually deployed —
+# forcing it on for local `python app.py` over plain http would silently
+# break the cookie. Same FLASK_DEBUG convention used at the bottom of this
+# file to gate Flask's debug mode.
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_DEBUG', 'true').lower() != 'true'
 
 DB_PATH             = os.path.join(os.path.dirname(__file__), 'data', 'fantasia.db')
 SCRAPER_STATUS_PATH = os.path.join(os.path.dirname(__file__), 'data', 'scraper_status.json')
@@ -65,6 +79,39 @@ def get_db():
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
     return conn
+
+
+# ── Auth (session-based PIN login) ──────────────────────────────────────────
+# Reads/GETs stay public (anyone can browse standings/rosters/draft board);
+# only writes need a real, non-spoofable identity. See /login below for how
+# session['manager_id'] gets set.
+
+LOGIN_EXEMPT_PATHS_EXACT = {'/login', '/internal/auto-scrape-trigger'}
+
+
+@app.before_request
+def require_login_for_writes():
+    if (request.method == 'GET'
+            or request.path in LOGIN_EXEMPT_PATHS_EXACT
+            or request.path.startswith('/login')):
+        return
+    if 'manager_id' not in session:
+        return jsonify({"error": "Not logged in"}), 401
+
+
+def current_manager_id():
+    return session.get('manager_id')
+
+
+@app.context_processor
+def inject_current_manager():
+    manager_id = session.get('manager_id')
+    if not manager_id:
+        return {'current_manager_name': None, 'current_manager_id': None}
+    conn = get_db()
+    row = conn.execute("SELECT name FROM managers WHERE id=?", (manager_id,)).fetchone()
+    conn.close()
+    return {'current_manager_name': row['name'] if row else None, 'current_manager_id': manager_id}
 
 
 def log_audit(conn, manager_id, entity_type, action, summary, detail=None):
@@ -490,12 +537,13 @@ def propose_transfer_journalist():
     name = (data.get('name') or '').strip()
     x_handle = (data.get('x_handle') or '').strip().lstrip('@')
     notes = (data.get('notes') or '').strip()
-    proposed_by = (data.get('proposed_by') or '').strip()
 
-    if not name or not x_handle or not proposed_by:
-        return jsonify({"error": "Name, X handle, and proposer are required"}), 400
+    if not name or not x_handle:
+        return jsonify({"error": "Name and X handle are required"}), 400
 
     conn = get_db()
+    proposer = conn.execute("SELECT name FROM managers WHERE id=?", (current_manager_id(),)).fetchone()
+    proposed_by = proposer['name'] if proposer else 'Unknown'
     conn.execute("""
         INSERT INTO transfer_journalists (name, x_handle, notes, added_at, status, proposed_by)
         VALUES (?, ?, ?, ?, 'pending', ?)
@@ -798,22 +846,15 @@ def fetch_canvas_image():
 
 @app.route('/memes/new', methods=['POST'])
 def create_meme_post():
-    manager_id = request.form.get('manager_id')
+    manager_id = current_manager_id()
     caption = (request.form.get('caption') or '').strip()
     link_url = (request.form.get('link_url') or '').strip()
     image_file = request.files.get('image')
 
-    if not manager_id:
-        return jsonify({"error": "Missing manager_id"}), 400
     if not image_file and not link_url:
         return jsonify({"error": "Provide an image or a link"}), 400
 
     conn = get_db()
-    manager = conn.execute("SELECT id FROM managers WHERE id=?", (manager_id,)).fetchone()
-    if not manager:
-        conn.close()
-        return jsonify({"error": "Manager not found"}), 404
-
     now = now_eastern_naive().isoformat()
 
     if image_file and image_file.filename:
@@ -840,7 +881,7 @@ def create_meme_post():
 
 @app.route('/memes/<int:post_id>/edit', methods=['POST'])
 def edit_meme_post(post_id):
-    manager_id = request.form.get('manager_id')
+    manager_id = current_manager_id()
     caption = request.form.get('caption')
     link_url = (request.form.get('link_url') or '').strip()
     image_file = request.files.get('image')
@@ -878,8 +919,7 @@ def edit_meme_post(post_id):
 
 @app.route('/memes/<int:post_id>/delete', methods=['POST'])
 def delete_meme_post(post_id):
-    data = request.get_json() or {}
-    manager_id = data.get('manager_id')
+    manager_id = current_manager_id()
 
     conn = get_db()
     post = conn.execute("SELECT * FROM meme_posts WHERE id=?", (post_id,)).fetchone()
@@ -907,10 +947,10 @@ def delete_meme_post(post_id):
 @app.route('/memes/<int:post_id>/react', methods=['POST'])
 def react_to_meme_post(post_id):
     data = request.get_json() or {}
-    manager_id = data.get('manager_id')
+    manager_id = current_manager_id()
     emoji = data.get('emoji')
-    if not manager_id or not emoji:
-        return jsonify({"error": "Missing manager_id or emoji"}), 400
+    if not emoji:
+        return jsonify({"error": "Missing emoji"}), 400
 
     conn = get_db()
     existing = conn.execute("""
@@ -934,10 +974,10 @@ def react_to_meme_post(post_id):
 @app.route('/memes/<int:post_id>/comment', methods=['POST'])
 def comment_on_meme_post(post_id):
     data = request.get_json() or {}
-    manager_id = data.get('manager_id')
+    manager_id = current_manager_id()
     body = (data.get('body') or '').strip()
-    if not manager_id or not body:
-        return jsonify({"error": "Missing manager_id or comment body"}), 400
+    if not body:
+        return jsonify({"error": "Missing comment body"}), 400
 
     conn = get_db()
     conn.execute("""
@@ -952,8 +992,7 @@ def comment_on_meme_post(post_id):
 
 @app.route('/memes/comment/<int:comment_id>/delete', methods=['POST'])
 def delete_meme_comment(comment_id):
-    data = request.get_json() or {}
-    manager_id = data.get('manager_id')
+    manager_id = current_manager_id()
 
     conn = get_db()
     comment = conn.execute("SELECT * FROM meme_comments WHERE id=?", (comment_id,)).fetchone()
@@ -968,6 +1007,82 @@ def delete_meme_comment(comment_id):
     conn.commit()
     conn.close()
     return jsonify({"status": "ok"})
+
+
+# ── Login ────────────────────────────────────────────────────────────────────
+
+@app.route('/login', methods=['GET'])
+def login():
+    conn = get_db()
+    managers = conn.execute("SELECT id, name, team_name FROM managers ORDER BY name").fetchall()
+
+    selected = request.args.get('manager_id', type=int)
+    selected_manager = None
+    needs_pin_setup = False
+    if selected:
+        row = conn.execute("SELECT id, name, team_name, pin_hash FROM managers WHERE id=?", (selected,)).fetchone()
+        if row:
+            selected_manager = row
+            needs_pin_setup = row['pin_hash'] is None
+    conn.close()
+
+    return render_template('login.html', managers=managers,
+                            selected_manager=selected_manager, needs_pin_setup=needs_pin_setup)
+
+
+@app.route('/login', methods=['POST'])
+def login_submit():
+    data = request.get_json(silent=True) or {}
+    try:
+        manager_id = int(data.get('manager_id'))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Select a manager."}), 400
+    pin = (data.get('pin') or '').strip()
+    confirm_pin = (data.get('confirm_pin') or '').strip()
+
+    conn = get_db()
+    row = conn.execute("SELECT id, name, pin_hash FROM managers WHERE id=?", (manager_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"error": "Unknown manager."}), 400
+
+    if not pin:
+        conn.close()
+        return jsonify({"error": "Enter a PIN."}), 400
+
+    if row['pin_hash'] is None:
+        # First-time setup — re-check pin_hash is still NULL server-side
+        # (don't trust a client-submitted "which branch" flag) so nobody
+        # can silently overwrite a friend's PIN once it's been claimed.
+        if pin != confirm_pin:
+            conn.close()
+            return jsonify({"error": "PINs don't match."}), 400
+        if len(pin) < 4:
+            conn.close()
+            return jsonify({"error": "PIN must be at least 4 characters."}), 400
+        conn.execute("UPDATE managers SET pin_hash=? WHERE id=? AND pin_hash IS NULL",
+                     (generate_password_hash(pin), manager_id))
+        if conn.total_changes == 0:
+            conn.close()
+            return jsonify({"error": "This manager already has a PIN set — enter it instead."}), 409
+        conn.commit()
+        conn.close()
+    else:
+        if not check_password_hash(row['pin_hash'], pin):
+            conn.close()
+            return jsonify({"error": "Incorrect PIN."}), 401
+        conn.close()
+
+    session.clear()
+    session['manager_id'] = manager_id
+    session.permanent = True
+    return jsonify({"status": "ok", "redirect": url_for('standings')})
+
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
 
 
 # ── Standings ────────────────────────────────────────────────────────────────
@@ -1405,13 +1520,13 @@ def update_roster_slot():
     (Part 3) is enforced below.
     """
     data = request.get_json() or {}
-    manager_id = data.get('manager_id')
+    manager_id = current_manager_id()
     player_name = data.get('player_name')
     gw = data.get('gw')
     new_slot_type = data.get('slot_type')
     new_position_slot = data.get('position_slot')
 
-    if not all([manager_id, player_name, gw, new_slot_type, new_position_slot]):
+    if not all([player_name, gw, new_slot_type, new_position_slot]):
         return jsonify({"error": "Missing required fields"}), 400
     gw = int(gw)
 
@@ -1479,11 +1594,11 @@ def update_roster_slot():
 @app.route('/api/manager/rename', methods=['POST'])
 def rename_team():
     data = request.get_json() or {}
-    manager_id = data.get('manager_id')
+    manager_id = current_manager_id()
     team_name = (data.get('team_name') or '').strip()
 
-    if not manager_id or not team_name:
-        return jsonify({"error": "Missing manager_id or team_name"}), 400
+    if not team_name:
+        return jsonify({"error": "Missing team_name"}), 400
     if len(team_name) > 40:
         return jsonify({"error": "Team name must be 40 characters or fewer"}), 400
 
@@ -1503,11 +1618,9 @@ def rename_team():
 
 @app.route('/api/manager/photo', methods=['POST'])
 def upload_manager_photo():
-    manager_id = request.form.get('manager_id')
+    manager_id = current_manager_id()
     file = request.files.get('photo')
 
-    if not manager_id:
-        return jsonify({"error": "Missing manager_id"}), 400
     if not file or not file.filename:
         return jsonify({"error": "No file uploaded"}), 400
 
@@ -1835,12 +1948,12 @@ def execute_roster_swap(conn, manager_id, add_player, drop_player, gw, source):
 @app.route('/api/roster/swap', methods=['POST'])
 def swap_roster_player():
     data = request.get_json() or {}
-    manager_id  = data.get('manager_id')
+    manager_id  = current_manager_id()
     drop_player = data.get('drop_player')
     add_player  = data.get('add_player')
     gw          = data.get('gw')
 
-    if not all([manager_id, drop_player, add_player, gw]):
+    if not all([drop_player, add_player, gw]):
         return jsonify({"error": "Missing required fields"}), 400
 
     conn = get_db()
@@ -1983,12 +2096,12 @@ def waiver_open():
 @app.route('/api/waiver/claim', methods=['POST'])
 def waiver_claim():
     data = request.get_json() or {}
-    manager_id  = data.get('manager_id')
+    manager_id  = current_manager_id()
     add_player  = data.get('add_player')
     drop_player = data.get('drop_player')
     gw          = data.get('gw')
 
-    if not all([manager_id, add_player, drop_player, gw]):
+    if not all([add_player, drop_player, gw]):
         return jsonify({"error": "Missing required fields"}), 400
 
     conn = get_db()
@@ -2051,6 +2164,8 @@ def waiver_claim_reorder(claim_id):
         claim = conn.execute("SELECT * FROM waiver_claims WHERE id=? AND status='pending'", (claim_id,)).fetchone()
         if not claim:
             return jsonify({"error": "Claim not found"}), 404
+        if claim['manager_id'] != current_manager_id():
+            return jsonify({"error": "Only the manager who submitted this claim can reorder it"}), 403
 
         if direction == 'up':
             neighbor = conn.execute("""
@@ -2094,6 +2209,8 @@ def waiver_claim_delete(claim_id):
         claim = conn.execute("SELECT * FROM waiver_claims WHERE id=? AND status='pending'", (claim_id,)).fetchone()
         if not claim:
             return jsonify({"error": "Claim not found"}), 404
+        if claim['manager_id'] != current_manager_id():
+            return jsonify({"error": "Only the manager who submitted this claim can cancel it"}), 403
         conn.execute("DELETE FROM waiver_claims WHERE id=?", (claim_id,))
         log_audit(conn, claim['manager_id'], 'waiver', 'cancel_claim',
                   f"Cancelled waiver claim: add {claim['add_player']}, drop {claim['drop_player']}")
@@ -2130,6 +2247,8 @@ def waiver_claims_reorder_all():
             return jsonify({"error": "One or more claims not found or no longer pending"}), 404
         if len({c['manager_id'] for c in claims}) != 1 or len({c['window_id'] for c in claims}) != 1:
             return jsonify({"error": "All claims being reordered must belong to the same manager and window"}), 400
+        if claims[0]['manager_id'] != current_manager_id():
+            return jsonify({"error": "Only the manager who submitted these claims can reorder them"}), 403
 
         for i, cid in enumerate(ordered_ids, start=1):
             conn.execute("UPDATE waiver_claims SET priority=? WHERE id=?", (-i, cid))
@@ -2549,7 +2668,7 @@ def draft_state_api():
 @app.route('/api/draft/pick', methods=['POST'])
 def draft_pick():
     data = request.get_json() or {}
-    manager_id = data.get('manager_id')
+    manager_id = current_manager_id()
     player_name = data.get('player_name')
 
     conn = get_db()
@@ -2621,8 +2740,7 @@ def draft_claim_token():
     Token numbers 1-8 are auto-assigned in claim order (first claimer gets
     #1). Every manager must claim exactly one across their 16 turns.
     """
-    data = request.get_json() or {}
-    manager_id = data.get('manager_id')
+    manager_id = current_manager_id()
 
     conn = get_db()
     state = get_draft_state(conn)
@@ -2802,13 +2920,14 @@ def draft_comment():
     data = request.get_json() or {}
     target_type = data.get('target_type')
     target_id = data.get('target_id')
-    author_name = (data.get('author_name') or '').strip()
     comment = (data.get('comment') or '').strip()
 
-    if target_type not in ('pick', 'team') or not target_id or not author_name or not comment:
+    if target_type not in ('pick', 'team') or not target_id or not comment:
         return jsonify({"error": "Missing required fields"}), 400
 
     conn = get_db()
+    author = conn.execute("SELECT name FROM managers WHERE id=?", (current_manager_id(),)).fetchone()
+    author_name = author['name'] if author else 'Unknown'
     conn.execute("""
         INSERT INTO draft_comments (season, target_type, target_id, author_name, comment, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
@@ -3132,12 +3251,12 @@ def transfer_draft_pick(draft_type):
     if draft_type not in TRANSFER_TYPES:
         return jsonify({"error": "Invalid draft type"}), 400
     data = request.get_json() or {}
-    manager_id = data.get('manager_id')
+    manager_id = current_manager_id()
     player_name = data.get('player_name')
     dropped_player = data.get('dropped_player')
     gw = data.get('gw')
 
-    if not all([manager_id, player_name, dropped_player, gw]):
+    if not all([player_name, dropped_player, gw]):
         return jsonify({"error": "Missing required fields"}), 400
 
     conn = get_db()
@@ -3195,10 +3314,7 @@ def transfer_draft_pick(draft_type):
 def transfer_draft_pass(draft_type):
     if draft_type not in TRANSFER_TYPES:
         return jsonify({"error": "Invalid draft type"}), 400
-    data = request.get_json() or {}
-    manager_id = data.get('manager_id')
-    if not manager_id:
-        return jsonify({"error": "Missing manager_id"}), 400
+    manager_id = current_manager_id()
 
     conn = get_db()
     try:

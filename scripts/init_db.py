@@ -30,7 +30,8 @@ def create_schema(conn):
     CREATE TABLE IF NOT EXISTS managers (
         id INTEGER PRIMARY KEY,
         name TEXT NOT NULL,
-        team_name TEXT NOT NULL
+        team_name TEXT NOT NULL,
+        pin_hash TEXT
     )
     """)
 
