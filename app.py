@@ -3266,6 +3266,11 @@ def _fetch_audit_entries(conn, manager_id=None, date_from=None, date_to=None,
     return [dict(r) for r in rows]
 
 
+@app.route('/playoffs')
+def playoffs_page():
+    return render_template('playoffs.html', scraper_status=read_scraper_status())
+
+
 @app.route('/audit-history')
 def audit_history():
     conn = get_db()
