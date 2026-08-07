@@ -376,7 +376,7 @@ def run_scraper_background(gw, started_at, trigger='manual'):
         output = "".join(output_lines)
         stderr_text = "".join(stderr_lines)
         returncode = proc.returncode
-        completed_at = datetime.now().strftime('%b %d, %Y at %-I:%M %p')
+        completed_at = now_eastern_naive().strftime('%b %d, %Y at %-I:%M %p')
         agg = parse_scrape_gw_output(output)
         summary = {"perfect": str(agg["perfect"]), "discrepancies": str(agg["discrepancies"]), "errors": str(agg["errors"])}
 
@@ -409,7 +409,7 @@ def run_scraper_background(gw, started_at, trigger='manual'):
                 "gw":           gw,
             })
     except Exception as e:
-        completed_at = completed_at or datetime.now().strftime('%b %d, %Y at %-I:%M %p')
+        completed_at = completed_at or now_eastern_naive().strftime('%b %d, %Y at %-I:%M %p')
         write_scraper_status({
             "status":       "error",
             "error":        f"❌ {e}",
@@ -3302,11 +3302,11 @@ def start_scrape(gw, trigger='manual'):
     """Shared by the manual 'Press the Button' route and the auto-scrape
     poller — writes the running status and launches the background thread.
     Caller is responsible for checking the scraper isn't already running."""
-    started_at = datetime.now().strftime('%b %d, %Y at %-I:%M %p')
+    started_at = now_eastern_naive().strftime('%b %d, %Y at %-I:%M %p')
     write_scraper_status({
         "status":       "running",
         "started_at":   started_at,
-        "started_at_iso": datetime.now().isoformat(),
+        "started_at_iso": now_eastern_naive().isoformat(),
         "completed_at": None,
         "gw":           gw,
     })
@@ -3324,7 +3324,7 @@ def trigger_scrape():
         is_stale = False
         if started_iso:
             try:
-                age = datetime.now() - datetime.fromisoformat(started_iso)
+                age = now_eastern_naive() - datetime.fromisoformat(started_iso)
                 is_stale = age.total_seconds() > SCRAPER_STALE_MINUTES * 60
             except ValueError:
                 is_stale = True
