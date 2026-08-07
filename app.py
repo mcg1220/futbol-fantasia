@@ -422,6 +422,30 @@ def run_scraper_background(proc, gw, started_at, trigger='manual'):
 
 # ── Scraper audit log ────────────────────────────────────────────────────────
 
+SCRAPER_TIMESTAMP_FMT = '%b %d, %Y at %-I:%M %p'
+
+
+def format_duration(started_at, completed_at):
+    """Human-readable duration between two SCRAPER_TIMESTAMP_FMT strings, e.g.
+    '<1 min', '14 min', '1h 3m'. Minute-precision only, matching the
+    precision of the stored timestamps themselves. None if either is
+    missing/unparseable (e.g. a run that's still going, or an old row from
+    before this format existed)."""
+    if not started_at or not completed_at:
+        return None
+    try:
+        start = datetime.strptime(started_at, SCRAPER_TIMESTAMP_FMT)
+        end = datetime.strptime(completed_at, SCRAPER_TIMESTAMP_FMT)
+    except ValueError:
+        return None
+    minutes = int((end - start).total_seconds() // 60)
+    if minutes < 1:
+        return '<1 min'
+    if minutes < 60:
+        return f'{minutes} min'
+    return f'{minutes // 60}h {minutes % 60}m'
+
+
 @app.route('/scraper-log')
 def scraper_log():
     conn = get_db()
@@ -434,6 +458,7 @@ def scraper_log():
     for r in runs:
         row = dict(r)
         row['detail'] = json.loads(row['detail_json'])
+        row['duration'] = format_duration(row.get('started_at'), row.get('completed_at'))
         runs_out.append(row)
 
     return render_template('scraper_log.html', runs=runs_out, scraper_status=read_scraper_status())

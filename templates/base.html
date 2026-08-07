@@ -94,6 +94,20 @@
       } catch(e) { return null; }
     }
 
+    // Live "how long has this actually been running" readout — separate
+    // from calcETA's fixed ~15min estimate, so a run that's overrunning is
+    // obvious at a glance instead of just comparing two clock times by eye.
+    function calcElapsed(startedIso) {
+      try {
+        const ms = Date.now() - new Date(startedIso).getTime();
+        if (ms < 0) return null;
+        const totalSec = Math.floor(ms / 1000);
+        const m = Math.floor(totalSec / 60);
+        const s = totalSec % 60;
+        return `${m}m ${s}s`;
+      } catch(e) { return null; }
+    }
+
     // Turns a scraper_status.json "progress" blob (written match-by-match by
     // run_scraper_background as it streams scrape_gw.py's PROGRESS: lines)
     // into a short live status string, so the banner shows real work
@@ -120,8 +134,10 @@
         const etaStr = eta ? ` · Usually takes ~15 min — estimated completion around <strong>${eta}</strong>` : ' · Usually takes ~15 min';
         const progressStr = formatProgress(data.progress);
         const statusStr = progressStr ? ` · <strong>${progressStr}</strong>` : etaStr;
+        const elapsed = data.started_at_iso ? calcElapsed(data.started_at_iso) : null;
+        const elapsedStr = elapsed ? ` (running for <strong>${elapsed}</strong>)` : '';
         banner.className = 'scraper-banner banner-running';
-        banner.innerHTML = `⏳ <strong>Scraper running</strong> since ${data.started_at}${statusStr}. Please don't press the button again.`;
+        banner.innerHTML = `⏳ <strong>Scraper running</strong> since ${data.started_at}${elapsedStr}${statusStr}. Please don't press the button again.`;
         banner.style.display = 'block';
         document.querySelectorAll('.scrape-btn').forEach(b => {
           b.disabled = true;

@@ -11,7 +11,7 @@
   {% if scraper_status.status == 'running' %}
   <div class="table-wrap" style="padding:14px 20px;margin-bottom:16px">
     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:10px">
-      <span>⏳ Scraper shows <strong>running</strong> since {{ scraper_status.started_at }}.</span>
+      <span>⏳ Scraper shows <strong>running</strong> since {{ scraper_status.started_at }} <span id="scraperElapsed"></span>.</span>
       <button type="button" class="action-btn" onclick="cancelScraper()">🛑 Cancel Scrape</button>
       <button type="button" class="action-btn" onclick="forceResetScraper()">⚠️ Force Reset</button>
     </div>
@@ -46,8 +46,22 @@
     // mid-scrape rather than just watching the banner.
     (function() {
       const feedEl = document.getElementById('scraperProgressFeed');
+      const elapsedEl = document.getElementById('scraperElapsed');
       const seen = new Set();
       const lines = [];
+
+      // Mirrors calcElapsed() in base.html's site-wide banner — kept as a
+      // separate copy per-template like the rest of this file's polling
+      // logic (see outcomeLabel below, also duplicated from base.html).
+      function calcElapsed(startedIso) {
+        if (!startedIso) return '';
+        const ms = Date.now() - new Date(startedIso).getTime();
+        if (ms < 0) return '';
+        const totalSec = Math.floor(ms / 1000);
+        const m = Math.floor(totalSec / 60);
+        const s = totalSec % 60;
+        return `(running for ${m}m ${s}s)`;
+      }
 
       function outcomeLabel(outcome) {
         return {
@@ -72,6 +86,7 @@
             window.location.reload();
             return;
           }
+          if (elapsedEl) elapsedEl.textContent = calcElapsed(data.started_at_iso);
           if (data.progress) {
             const key = `${data.progress.gw}-${data.progress.match_index}-${data.progress.stage}`;
             if (!seen.has(key)) {
@@ -103,7 +118,7 @@
           {% if run.status == 'complete' %}✅{% elif run.status == 'error' and run.perfect_count > 0 %}⚠️{% else %}❌{% endif %}
         </span>
         <strong>GW{{ run.gw_start }}{% if run.gw_end != run.gw_start %}–GW{{ run.gw_end }}{% endif %}</strong>
-        <span style="color:var(--text-secondary)">{{ run.completed_at }}</span>
+        <span style="color:var(--text-secondary)">{{ run.completed_at }}{% if run.duration %} · took {{ run.duration }}{% endif %}</span>
         <span style="margin-left:auto;font-size:0.9em;color:var(--text-secondary)">
           ✅ {{ run.perfect_count }} perfect &nbsp;·&nbsp;
           ⚠️ {{ run.discrepancy_count }} discrepancy &nbsp;·&nbsp;
