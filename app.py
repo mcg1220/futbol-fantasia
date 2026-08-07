@@ -330,37 +330,24 @@ def save_scraper_run(gw, gw_end, started_at, completed_at, status, agg, error_no
     conn.close()
 
 
-def run_scraper_background(gw, started_at, trigger='manual'):
+def run_scraper_background(proc, gw, started_at, trigger='manual'):
     """
-    Launches scrape_gw.py and streams its stdout line-by-line (Popen, not
-    subprocess.run) so PROGRESS: lines can update scraper_status.json's
+    Streams the already-launched scrape_gw.py's stdout line-by-line (Popen,
+    not subprocess.run) so PROGRESS: lines can update scraper_status.json's
     `progress` field in near-real-time — the banner and Scraper Log page
     poll that file every 5s, otherwise a scrape runs ~15min with zero
     visibility. All other output is still buffered and parsed for the final
     RESULT_JSON: summary exactly as before; only the streaming mechanism
     changed, not the post-run reporting.
+
+    `proc` is created by the caller (start_scrape), not here — its pid needs
+    to land in the very first "running" status write so there's never a
+    window where the status says running without a pid cancel can act on.
     """
     completed_at = None
     output_lines = []
     stderr_lines = []
     try:
-        proc = subprocess.Popen(
-            [sys.executable, 'scrape_gw.py', '--gw', str(gw), '--season', '2026-27'],
-            cwd=SCRIPTS_DIR,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-            # Its own process group (not just its own process) so cancel can
-            # kill the whole tree in one shot — scrape_gw.py's Playwright
-            # browser is a child process that a plain kill of just the
-            # Python pid would leave orphaned and still running.
-            preexec_fn=os.setsid,
-        )
-        status = read_scraper_status()
-        status["pid"] = proc.pid
-        write_scraper_status(status)
-
         def drain_stderr():
             for line in proc.stderr:
                 stderr_lines.append(line)
@@ -3319,8 +3306,24 @@ SCRAPER_STALE_MINUTES = 45  # a "running" status older than this has no real pro
 
 def start_scrape(gw, trigger='manual'):
     """Shared by the manual 'Press the Button' route and the auto-scrape
-    poller — writes the running status and launches the background thread.
-    Caller is responsible for checking the scraper isn't already running."""
+    poller — launches the subprocess, writes the running status (with its
+    pid, atomically — see run_scraper_background's docstring for why),
+    then hands the already-running proc off to a background thread to
+    stream and report on. Caller is responsible for checking the scraper
+    isn't already running."""
+    proc = subprocess.Popen(
+        [sys.executable, 'scrape_gw.py', '--gw', str(gw), '--season', '2026-27'],
+        cwd=SCRIPTS_DIR,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+        # Its own process group (not just its own process) so cancel can
+        # kill the whole tree in one shot — scrape_gw.py's Playwright
+        # browser is a child process that a plain kill of just the Python
+        # pid would leave orphaned and still running.
+        preexec_fn=os.setsid,
+    )
     started_at = now_eastern_naive().strftime('%b %d, %Y at %-I:%M %p')
     write_scraper_status({
         "status":       "running",
@@ -3328,8 +3331,9 @@ def start_scrape(gw, trigger='manual'):
         "started_at_iso": now_eastern_naive().isoformat(),
         "completed_at": None,
         "gw":           gw,
+        "pid":          proc.pid,
     })
-    t = threading.Thread(target=run_scraper_background, args=(gw, started_at, trigger))
+    t = threading.Thread(target=run_scraper_background, args=(proc, gw, started_at, trigger))
     t.daemon = True
     t.start()
     return started_at
