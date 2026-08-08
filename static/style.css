@@ -1282,7 +1282,11 @@ tr:nth-child(3) .rank-num, tr:nth-child(4) .rank-num { color: var(--pl-magenta);
   color: var(--text-muted);
 }
 .snake-pick-player { display: block; font-weight: 600; font-size: 11px; }
-.snake-pick-traded { position: absolute; top: 2px; right: 3px; font-size: 10px; }
+.snake-cell:has(.snake-pick-traded) { height: 46px; }
+.snake-pick-traded {
+  display: block; font-size: 9px; font-weight: 700; color: var(--pl-magenta);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .snake-cell-picked { background: var(--pl-magenta-bg); }
 .snake-cell-current { outline: 2px solid var(--pl-magenta); outline-offset: -2px; background: var(--pl-green-bg); }
 .transfer-matrix-divider { text-align: center; font-size: 11px; color: var(--text-muted); background: var(--bg-thead); padding: 4px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }

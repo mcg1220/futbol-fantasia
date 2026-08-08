@@ -127,7 +127,7 @@
             <td class="snake-cell" id="snake-cell-{{ overall }}" data-overall="{{ overall }}">
               <span class="snake-pick-num">{{ overall }}</span>
               {% if true_owner and true_owner.manager_id != m.id %}
-              <span class="snake-pick-traded" title="Traded to {{ managers_by_id[true_owner.manager_id].name if true_owner.manager_id in managers_by_id else true_owner.manager_id }}">🔁</span>
+              <span class="snake-pick-traded" title="Traded to {{ managers_by_id[true_owner.manager_id].name if true_owner.manager_id in managers_by_id else true_owner.manager_id }}">🔁 {{ managers_by_id[true_owner.manager_id].name if true_owner.manager_id in managers_by_id else true_owner.manager_id }}</span>
               {% endif %}
               <span class="snake-pick-player"></span>
             </td>
