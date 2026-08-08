@@ -12,11 +12,47 @@ Usage:
 
 import sqlite3
 import argparse
+import os
+import signal
 import subprocess
 import sys
 import time
 import json
+from types import SimpleNamespace
 from init_db import DB_PATH
+
+
+def run_match_scrape(cmd, timeout):
+    """
+    Runs a single match's scraper.py with a hard wall-clock timeout, killing
+    its whole process group (not just the scraper.py pid) if it's exceeded.
+
+    Plain subprocess.run(..., timeout=...) only kills the direct child on
+    timeout — but scraper.py launches a Playwright-driven Chromium browser
+    as a grandchild process, which does NOT reliably die with its parent.
+    A match that hangs (WhoScored slow to respond, a selector that never
+    resolves) left that orphaned Chromium running indefinitely, and those
+    piled up across a scrape run until the container ran out of memory and
+    got OOM-killed by the host — which is what took the site down. Launching
+    scraper.py in its own session (preexec_fn=os.setsid) means a timeout can
+    os.killpg() the whole tree, browser included, exactly like the outer
+    scrape_gw.py process already does for its own cancel button.
+    """
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        preexec_fn=os.setsid,
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        stdout, stderr = proc.communicate()
+        raise subprocess.TimeoutExpired(cmd, timeout, output=stdout, stderr=stderr)
+
+    return SimpleNamespace(stdout=stdout, stderr=stderr, returncode=proc.returncode)
 
 
 def get_match_ids_for_gw(gw_number, season='2026-27'):
@@ -59,7 +95,7 @@ def scrape_gw(gw_number, rescrape=False, compare=False, delay=4, season='2026-27
             cmd.append("--compare")
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            result = run_match_scrape(cmd, timeout=120)
             output = result.stdout
 
             # Always surface tab-load failure warnings, regardless of which

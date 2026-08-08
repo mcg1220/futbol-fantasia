@@ -381,60 +381,63 @@ def scrape_match(match_id, headless=True):
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                       "AppleWebKit/537.36 (KHTML, like Gecko) "
-                       "Chrome/120.0.0.0 Safari/537.36"
-        )
-        page = context.new_page()
-        page.route("**/*.{png,jpg,jpeg,gif,woff,woff2}", lambda route: route.abort())
-
-        print("  Loading page...")
-        if not goto_with_retry(page, url, timeout=60000, retries=2):
-            browser.close()
-            raise Exception(f"Could not load match page after retries: {url}")
-        time.sleep(5)
-
-        accept_cookies(page)
-        dismiss_overlays(page)
-
         try:
-            home_team = page.locator(".home .team-link").first.inner_text(timeout=5000).strip()
-            away_team = page.locator(".away .team-link").first.inner_text(timeout=5000).strip()
-            print(f"  Teams: {home_team} vs {away_team}")
-        except:
-            print("  Warning: could not read team names")
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                           "AppleWebKit/537.36 (KHTML, like Gecko) "
+                           "Chrome/120.0.0.0 Safari/537.36"
+            )
+            page = context.new_page()
+            page.route("**/*.{png,jpg,jpeg,gif,woff,woff2}", lambda route: route.abort())
 
-        try:
-            score_text = page.locator(".result").first.inner_text(timeout=5000).strip()
-            parts = re.split(r'[:\-]', score_text)
-            if len(parts) == 2:
-                goals_home = parse_int(parts[0])
-                goals_away = parse_int(parts[1])
-            print(f"  Score: {goals_home}-{goals_away}")
-        except:
-            print("  Warning: could not read score")
+            print("  Loading page...")
+            if not goto_with_retry(page, url, timeout=60000, retries=2):
+                raise Exception(f"Could not load match page after retries: {url}")
+            time.sleep(5)
 
-        for tab in TABS:
-            print(f"  Scraping {tab} tab...")
+            accept_cookies(page)
             dismiss_overlays(page)
 
-            home_container = f"statistics-table-home-{tab}"
-            home_ok = click_tab(page, "home", tab, home_container)
-            scrape_team_tab(page, home_container, home_team, home_players)
-            if not home_ok:
-                tab_failures.append(f"home/{tab}")
+            try:
+                home_team = page.locator(".home .team-link").first.inner_text(timeout=5000).strip()
+                away_team = page.locator(".away .team-link").first.inner_text(timeout=5000).strip()
+                print(f"  Teams: {home_team} vs {away_team}")
+            except:
+                print("  Warning: could not read team names")
 
-            away_container = f"statistics-table-away-{tab}"
-            away_ok = click_tab(page, "away", tab, away_container)
-            scrape_team_tab(page, away_container, away_team, away_players)
-            if not away_ok:
-                tab_failures.append(f"away/{tab}")
+            try:
+                score_text = page.locator(".result").first.inner_text(timeout=5000).strip()
+                parts = re.split(r'[:\-]', score_text)
+                if len(parts) == 2:
+                    goals_home = parse_int(parts[0])
+                    goals_away = parse_int(parts[1])
+                print(f"  Score: {goals_home}-{goals_away}")
+            except:
+                print("  Warning: could not read score")
 
-        print("  Scraping saves...")
-        scrape_saves(page, match_id, home_players, away_players)
+            for tab in TABS:
+                print(f"  Scraping {tab} tab...")
+                dismiss_overlays(page)
 
-        browser.close()
+                home_container = f"statistics-table-home-{tab}"
+                home_ok = click_tab(page, "home", tab, home_container)
+                scrape_team_tab(page, home_container, home_team, home_players)
+                if not home_ok:
+                    tab_failures.append(f"home/{tab}")
+
+                away_container = f"statistics-table-away-{tab}"
+                away_ok = click_tab(page, "away", tab, away_container)
+                scrape_team_tab(page, away_container, away_team, away_players)
+                if not away_ok:
+                    tab_failures.append(f"away/{tab}")
+
+            print("  Scraping saves...")
+            scrape_saves(page, match_id, home_players, away_players)
+        finally:
+            # Guaranteed even if something above raises — an unclosed browser
+            # is an orphaned Chromium process that keeps eating memory long
+            # after this match's scrape has moved on or failed.
+            browser.close()
 
     all_players = list(home_players.values()) + list(away_players.values())
     print(f"  Scraped {len(home_players)} home, {len(away_players)} away players.")

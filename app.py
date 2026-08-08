@@ -388,7 +388,7 @@ def save_scraper_run(gw, gw_end, started_at, completed_at, status, agg, error_no
     conn.close()
 
 
-def run_scraper_background(proc, gw, started_at, trigger='manual'):
+def run_scraper_background(proc, gw, started_at, trigger='manual', watchdog_killed=None):
     """
     Streams the already-launched scrape_gw.py's stdout line-by-line (Popen,
     not subprocess.run) so PROGRESS: lines can update scraper_status.json's
@@ -401,6 +401,10 @@ def run_scraper_background(proc, gw, started_at, trigger='manual'):
     `proc` is created by the caller (start_scrape), not here — its pid needs
     to land in the very first "running" status write so there's never a
     window where the status says running without a pid cancel can act on.
+
+    `watchdog_killed` is the Event start_scrape's watchdog thread sets right
+    before it force-kills a run that's overrun SCRAPER_STALE_MINUTES — used
+    here only to report an accurate reason, not to do the killing itself.
     """
     completed_at = None
     output_lines = []
@@ -438,9 +442,13 @@ def run_scraper_background(proc, gw, started_at, trigger='manual'):
             total = agg["total_fixtures"]
             if returncode < 0 and signal.Signals(-returncode) in (signal.SIGTERM, signal.SIGKILL):
                 # Negative returncode means the process died from a signal
-                # rather than exiting on its own — in this app the only
-                # thing that sends one is the cancel endpoint below.
-                error_msg = f"❌ Cancelled by request for GW{gw}."
+                # rather than exiting on its own — either the cancel
+                # endpoint below, or the watchdog thread in start_scrape
+                # force-killing a run that overran SCRAPER_STALE_MINUTES.
+                if watchdog_killed is not None and watchdog_killed.is_set():
+                    error_msg = f"❌ Scrape for GW{gw} ran past {SCRAPER_STALE_MINUTES} min and was force-killed to protect the server."
+                else:
+                    error_msg = f"❌ Cancelled by request for GW{gw}."
             elif total == 0:
                 stderr_tail = stderr_text.strip().splitlines()
                 reason = stderr_tail[-1] if stderr_tail else "no output — check server logs"
@@ -3702,6 +3710,26 @@ def audit_history_feed():
 SCRAPER_STALE_MINUTES = 45  # a "running" status older than this has no real process behind it
 
 
+def scrape_watchdog(proc, killed_event):
+    """Force-kills a scrape's whole process group if it's still alive after
+    SCRAPER_STALE_MINUTES. A single match is already bounded (scrape_gw.py's
+    own 120s-per-match timeout, itself process-group-enforced — see
+    run_match_scrape() in scrape_gw.py), so a run still going this long past
+    a normal ~20min gameweek scrape means something is genuinely stuck
+    rather than just slow, and left running it's exactly what starved the
+    container of memory and took the site down. SIGTERM (not SIGKILL) gives
+    the tree a chance to exit cleanly first; run_scraper_background reports
+    it as a watchdog kill via `killed_event` rather than a real cancel."""
+    time.sleep(SCRAPER_STALE_MINUTES * 60)
+    if proc.poll() is not None:
+        return  # already finished on its own
+    killed_event.set()
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+
+
 def start_scrape(gw, trigger='manual'):
     """Shared by the manual 'Press the Button' route and the auto-scrape
     poller — launches the subprocess, writes the running status (with its
@@ -3731,9 +3759,13 @@ def start_scrape(gw, trigger='manual'):
         "gw":           gw,
         "pid":          proc.pid,
     })
-    t = threading.Thread(target=run_scraper_background, args=(proc, gw, started_at, trigger))
+    watchdog_killed = threading.Event()
+    t = threading.Thread(target=run_scraper_background, args=(proc, gw, started_at, trigger, watchdog_killed))
     t.daemon = True
     t.start()
+    w = threading.Thread(target=scrape_watchdog, args=(proc, watchdog_killed))
+    w.daemon = True
+    w.start()
     return started_at
 
 
