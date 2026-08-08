@@ -2407,6 +2407,29 @@ def pick_to_manager(order_map, overall_pick):
     return round_num, pick_in_round, order_map.get(slot)
 
 
+def resolve_pick_owner(conn, order_map, overall_pick):
+    """Same (round_num, pick_in_round, manager_id) shape as pick_to_manager(),
+    but honors any accepted pick trade for this pick. No trade -> falls back
+    to the plain slot-based owner."""
+    round_num, pick_in_round, slot_manager = pick_to_manager(order_map, overall_pick)
+    override = conn.execute(
+        "SELECT manager_id FROM draft_pick_ownership WHERE season=? AND overall_pick=?",
+        (DRAFT_SEASON, overall_pick)
+    ).fetchone()
+    return round_num, pick_in_round, (override['manager_id'] if override else slot_manager)
+
+
+def compute_pick_ownership(conn, order_map):
+    """overall_pick (1..DRAFT_TOTAL_PICKS) -> {round, pick_in_round, manager_id},
+    accounting for accepted trades. Backs both /api/draft/trades and the
+    snake matrix's traded-pick annotation."""
+    ownership = {}
+    for overall_pick in range(1, DRAFT_TOTAL_PICKS + 1):
+        round_num, pick_in_round, manager_id = resolve_pick_owner(conn, order_map, overall_pick)
+        ownership[overall_pick] = {'round': round_num, 'pick_in_round': pick_in_round, 'manager_id': manager_id}
+    return ownership
+
+
 def auto_assign_slot(conn, manager_id, player_name):
     """
     Best-fit default slot for a freshly drafted player: first open starter
@@ -2550,10 +2573,12 @@ def draft_page():
     all_player_names = [r['name'] for r in conn.execute("SELECT name FROM players ORDER BY name").fetchall()]
     current_pl_clubs = get_current_pl_clubs(conn)
     my_shortlist = get_my_shortlist(conn)
+    pick_ownership = compute_pick_ownership(conn, order_map) if order_map else {}
     conn.close()
     return render_template('draft.html',
         state=dict(state),
         managers=managers,
+        managers_by_id=managers_by_id,
         order=order,
         browse_players=browse_players,
         season=DRAFT_SEASON,
@@ -2566,6 +2591,7 @@ def draft_page():
         all_player_names=all_player_names,
         current_pl_clubs=current_pl_clubs,
         my_shortlist=my_shortlist,
+        pick_ownership=pick_ownership,
     )
 
 
@@ -2621,6 +2647,187 @@ def draft_start():
     return jsonify({"status": "ok"})
 
 
+# ── Main Draft pick trades ──────────────────────────────────────────────────
+# Trades are only allowed while the order is locked but the draft hasn't
+# started (status='ready') — see resolve_pick_owner() for how an accepted
+# trade overrides the default slot-based pick owner everywhere else.
+
+@app.route('/api/draft/trades')
+def draft_trades_api():
+    conn = get_db()
+    order_map = get_draft_order_map(conn)
+    ownership = compute_pick_ownership(conn, order_map) if order_map else {}
+
+    trades = [dict(t) for t in conn.execute("""
+        SELECT t.*, p.name AS proposer_name, tgt.name AS target_name
+        FROM draft_pick_trades t
+        JOIN managers p ON p.id = t.proposer_manager_id
+        JOIN managers tgt ON tgt.id = t.target_manager_id
+        WHERE t.season=?
+        ORDER BY t.created_at DESC
+    """, (DRAFT_SEASON,)).fetchall()]
+
+    items_by_trade = {}
+    for it in conn.execute("SELECT * FROM draft_pick_trade_items WHERE trade_id IN (SELECT id FROM draft_pick_trades WHERE season=?)", (DRAFT_SEASON,)).fetchall():
+        items_by_trade.setdefault(it['trade_id'], []).append(dict(it))
+    for t in trades:
+        t['items'] = items_by_trade.get(t['id'], [])
+
+    conn.close()
+    return jsonify({"ownership": ownership, "trades": trades})
+
+
+@app.route('/api/draft/trade/propose', methods=['POST'])
+def draft_trade_propose():
+    manager_id = current_manager_id()
+    data = request.get_json() or {}
+    try:
+        target_manager_id = int(data.get('target_manager_id'))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Missing or invalid target_manager_id."}), 400
+    give_picks = data.get('give_picks') or []
+    receive_picks = data.get('receive_picks') or []
+
+    if target_manager_id == int(manager_id):
+        return jsonify({"error": "You can't trade with yourself."}), 400
+    if not give_picks and not receive_picks:
+        return jsonify({"error": "Select at least one pick to trade."}), 400
+
+    conn = get_db()
+    state = get_draft_state(conn)
+    if state['status'] != 'ready':
+        conn.close()
+        return jsonify({"error": "Trades can only be proposed after the draft order is locked and before the draft starts."}), 409
+
+    target = conn.execute("SELECT id, name FROM managers WHERE id=?", (target_manager_id,)).fetchone()
+    if not target:
+        conn.close()
+        return jsonify({"error": "Unknown manager."}), 400
+
+    order_map = get_draft_order_map(conn)
+    items = []
+    for overall_pick in give_picks:
+        _, _, owner = resolve_pick_owner(conn, order_map, int(overall_pick))
+        if owner != int(manager_id):
+            conn.close()
+            return jsonify({"error": f"You don't currently own pick #{overall_pick}."}), 409
+        items.append((int(overall_pick), int(manager_id), target_manager_id))
+    for overall_pick in receive_picks:
+        _, _, owner = resolve_pick_owner(conn, order_map, int(overall_pick))
+        if owner != target_manager_id:
+            conn.close()
+            return jsonify({"error": f"{target['name']} doesn't currently own pick #{overall_pick}."}), 409
+        items.append((int(overall_pick), target_manager_id, int(manager_id)))
+
+    now = now_eastern_naive().isoformat()
+    cur = conn.execute(
+        "INSERT INTO draft_pick_trades (season, proposer_manager_id, target_manager_id, status, created_at) VALUES (?, ?, ?, 'pending', ?)",
+        (DRAFT_SEASON, manager_id, target_manager_id, now)
+    )
+    trade_id = cur.lastrowid
+    for overall_pick, from_id, to_id in items:
+        conn.execute(
+            "INSERT INTO draft_pick_trade_items (trade_id, overall_pick, from_manager_id, to_manager_id) VALUES (?, ?, ?, ?)",
+            (trade_id, overall_pick, from_id, to_id)
+        )
+
+    log_audit(conn, manager_id, 'draft_trade', 'propose', f"Proposed a pick trade with {target['name']}",
+              {"trade_id": trade_id, "give_picks": give_picks, "receive_picks": receive_picks})
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok", "trade_id": trade_id})
+
+
+def _get_pending_trade(conn, trade_id):
+    return conn.execute("SELECT * FROM draft_pick_trades WHERE id=? AND status='pending'", (trade_id,)).fetchone()
+
+
+@app.route('/api/draft/trade/<int:trade_id>/accept', methods=['POST'])
+def draft_trade_accept(trade_id):
+    manager_id = current_manager_id()
+    conn = get_db()
+    trade = _get_pending_trade(conn, trade_id)
+    if not trade:
+        conn.close()
+        return jsonify({"error": "Trade not found or already resolved."}), 404
+    if trade['target_manager_id'] != int(manager_id):
+        conn.close()
+        return jsonify({"error": "Only the manager this trade was sent to can accept it."}), 403
+
+    state = get_draft_state(conn)
+    if state['status'] != 'ready':
+        conn.close()
+        return jsonify({"error": "The draft has already started — this trade can no longer be applied."}), 409
+
+    order_map = get_draft_order_map(conn)
+    items = conn.execute("SELECT * FROM draft_pick_trade_items WHERE trade_id=?", (trade_id,)).fetchall()
+    for it in items:
+        _, _, owner = resolve_pick_owner(conn, order_map, it['overall_pick'])
+        if owner != it['from_manager_id']:
+            conn.close()
+            return jsonify({"error": f"Pick #{it['overall_pick']} has changed hands since this trade was proposed — ask them to re-propose."}), 409
+
+    for it in items:
+        conn.execute(
+            "INSERT INTO draft_pick_ownership (season, overall_pick, manager_id) VALUES (?, ?, ?) "
+            "ON CONFLICT(season, overall_pick) DO UPDATE SET manager_id=excluded.manager_id",
+            (DRAFT_SEASON, it['overall_pick'], it['to_manager_id'])
+        )
+
+    conn.execute(
+        "UPDATE draft_pick_trades SET status='accepted', responded_at=? WHERE id=?",
+        (now_eastern_naive().isoformat(), trade_id)
+    )
+    log_audit(conn, manager_id, 'draft_trade', 'accept', f"Accepted pick trade #{trade_id}", {"trade_id": trade_id})
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok"})
+
+
+@app.route('/api/draft/trade/<int:trade_id>/decline', methods=['POST'])
+def draft_trade_decline(trade_id):
+    manager_id = current_manager_id()
+    conn = get_db()
+    trade = _get_pending_trade(conn, trade_id)
+    if not trade:
+        conn.close()
+        return jsonify({"error": "Trade not found or already resolved."}), 404
+    if trade['target_manager_id'] != int(manager_id):
+        conn.close()
+        return jsonify({"error": "Only the manager this trade was sent to can decline it."}), 403
+
+    conn.execute(
+        "UPDATE draft_pick_trades SET status='declined', responded_at=? WHERE id=?",
+        (now_eastern_naive().isoformat(), trade_id)
+    )
+    log_audit(conn, manager_id, 'draft_trade', 'decline', f"Declined pick trade #{trade_id}", {"trade_id": trade_id})
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok"})
+
+
+@app.route('/api/draft/trade/<int:trade_id>/cancel', methods=['POST'])
+def draft_trade_cancel(trade_id):
+    manager_id = current_manager_id()
+    conn = get_db()
+    trade = _get_pending_trade(conn, trade_id)
+    if not trade:
+        conn.close()
+        return jsonify({"error": "Trade not found or already resolved."}), 404
+    if trade['proposer_manager_id'] != int(manager_id):
+        conn.close()
+        return jsonify({"error": "Only the manager who proposed this trade can cancel it."}), 403
+
+    conn.execute(
+        "UPDATE draft_pick_trades SET status='cancelled', responded_at=? WHERE id=?",
+        (now_eastern_naive().isoformat(), trade_id)
+    )
+    log_audit(conn, manager_id, 'draft_trade', 'cancel', f"Cancelled pick trade #{trade_id}", {"trade_id": trade_id})
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok"})
+
+
 def get_token_state(conn):
     """
     tokens_by_manager: manager_id -> Summer Transfer token number (1-8,
@@ -2665,7 +2872,7 @@ def draft_state_api():
 
     on_the_clock = None
     if state['status'] == 'in_progress' and order_map:
-        round_num, pick_in_round, manager_id = pick_to_manager(order_map, state['current_pick_number'])
+        round_num, pick_in_round, manager_id = resolve_pick_owner(conn, order_map, state['current_pick_number'])
         must_claim = (
             player_pick_counts.get(manager_id, 0) >= PLAYER_PICKS_PER_TEAM
             and manager_id not in tokens_by_manager
@@ -2727,7 +2934,7 @@ def draft_pick():
 
     order_map = get_draft_order_map(conn)
     overall_pick = state['current_pick_number']
-    round_num, pick_in_round, expected_manager_id = pick_to_manager(order_map, overall_pick)
+    round_num, pick_in_round, expected_manager_id = resolve_pick_owner(conn, order_map, overall_pick)
 
     if int(manager_id) != expected_manager_id:
         conn.close()
@@ -2798,7 +3005,7 @@ def draft_claim_token():
 
     order_map = get_draft_order_map(conn)
     overall_pick = state['current_pick_number']
-    round_num, pick_in_round, expected_manager_id = pick_to_manager(order_map, overall_pick)
+    round_num, pick_in_round, expected_manager_id = resolve_pick_owner(conn, order_map, overall_pick)
 
     if int(manager_id) != expected_manager_id:
         conn.close()
@@ -2906,6 +3113,9 @@ def draft_reset():
     conn.execute("DELETE FROM draft_state WHERE season=?", (DRAFT_SEASON,))
     conn.execute("DELETE FROM draft_order WHERE season=?", (DRAFT_SEASON,))
     conn.execute("DELETE FROM draft_picks WHERE season=?", (DRAFT_SEASON,))
+    conn.execute("DELETE FROM draft_pick_ownership WHERE season=?", (DRAFT_SEASON,))
+    conn.execute("DELETE FROM draft_pick_trade_items WHERE trade_id IN (SELECT id FROM draft_pick_trades WHERE season=?)", (DRAFT_SEASON,))
+    conn.execute("DELETE FROM draft_pick_trades WHERE season=?", (DRAFT_SEASON,))
     conn.execute("DELETE FROM rosters")
     log_audit(conn, None, 'draft', 'reset', "Reset the Main Draft (wiped all rosters)")
     conn.commit()

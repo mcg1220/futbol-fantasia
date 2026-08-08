@@ -1139,6 +1139,23 @@ tr:nth-child(3) .rank-num, tr:nth-child(4) .rank-num { color: var(--pl-magenta);
 .link-preview-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
 .link-preview-url { font-size: 12px; }
 .meme-post-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+.trade-pick-list {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  max-height: 220px; overflow-y: auto; padding: 8px;
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--bg-deep);
+}
+.trade-pick-item {
+  display: flex; align-items: center; gap: 8px; font-size: 13px;
+  padding: 5px 6px; border-radius: var(--radius-sm); cursor: pointer;
+}
+.trade-pick-item:hover { background: var(--bg-row-alt); }
+.trade-pick-empty { color: var(--text-muted); font-size: 13px; padding: 6px; }
+.pending-trade-card {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 12px 14px; background: var(--bg-card); font-size: 13px;
+}
+.pending-trade-card .trade-dir { margin: 4px 0; }
 .shortlist-star {
   border: none; background: none; cursor: pointer; font-size: 15px;
   padding: 2px 4px; line-height: 1; vertical-align: middle;
@@ -1265,6 +1282,7 @@ tr:nth-child(3) .rank-num, tr:nth-child(4) .rank-num { color: var(--pl-magenta);
   color: var(--text-muted);
 }
 .snake-pick-player { display: block; font-weight: 600; font-size: 11px; }
+.snake-pick-traded { position: absolute; top: 2px; right: 3px; font-size: 10px; }
 .snake-cell-picked { background: var(--pl-magenta-bg); }
 .snake-cell-current { outline: 2px solid var(--pl-magenta); outline-offset: -2px; background: var(--pl-green-bg); }
 .transfer-matrix-divider { text-align: center; font-size: 11px; color: var(--text-muted); background: var(--bg-thead); padding: 4px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }

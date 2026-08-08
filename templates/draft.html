@@ -42,6 +42,43 @@
     </div>
     <button type="button" class="primary-btn" style="margin-top:16px" onclick="startDraft()">🏁 Start Draft</button>
   </div>
+
+  <!-- ── Trade Picks ────────────────────────────────────────────────────── -->
+  <div class="table-wrap" style="padding:20px 24px;margin-top:16px">
+    <h3 style="margin-top:0">🤝 Trade Picks</h3>
+    <p style="color:var(--text-secondary);font-size:13px;margin-top:-6px">Trade one or more of your draft picks with another manager. Only possible in this window — once the draft starts, picks are locked in.</p>
+
+    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="gw-jump-label">Trade with</label>
+        <select id="trade-target-select" onchange="renderTradePickers()">
+          <option value="">— Select a manager —</option>
+          {% for m in order %}
+          {% if m.id != current_manager_id %}
+          <option value="{{ m.id }}">{{ m.name }} ({{ m.team_name }})</option>
+          {% endif %}
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px" id="trade-pickers-wrap">
+      <div>
+        <label class="gw-jump-label">Your picks to give</label>
+        <div class="trade-pick-list" id="trade-give-list"></div>
+      </div>
+      <div>
+        <label class="gw-jump-label">Their picks to receive</label>
+        <div class="trade-pick-list" id="trade-receive-list"></div>
+      </div>
+    </div>
+
+    <button type="button" class="primary-btn" style="margin-top:14px" onclick="proposeTrade()">Propose Trade</button>
+    <div id="trade-propose-error" style="color:var(--pl-magenta);font-size:13px;margin-top:8px;display:none"></div>
+
+    <h4 style="margin:22px 0 10px">Pending trades</h4>
+    <div id="pending-trades-list" style="display:flex;flex-direction:column;gap:10px"></div>
+  </div>
   {% endif %}
 
   {% if state.status in ('in_progress', 'complete', 'locked') %}
@@ -86,8 +123,12 @@
             <td class="snake-round-label">R{{ round }} {% if round % 2 == 0 %}←{% else %}→{% endif %}</td>
             {% for m in order %}
             {% set overall = (round - 1) * 8 + (m.pick_slot if round % 2 == 1 else 9 - m.pick_slot) %}
+            {% set true_owner = pick_ownership.get(overall) %}
             <td class="snake-cell" id="snake-cell-{{ overall }}" data-overall="{{ overall }}">
               <span class="snake-pick-num">{{ overall }}</span>
+              {% if true_owner and true_owner.manager_id != m.id %}
+              <span class="snake-pick-traded" title="Traded to {{ managers_by_id[true_owner.manager_id].name if true_owner.manager_id in managers_by_id else true_owner.manager_id }}">🔁</span>
+              {% endif %}
               <span class="snake-pick-player"></span>
             </td>
             {% endfor %}
@@ -378,6 +419,110 @@ async function unlockDraft() {
   const data = await res.json();
   if (!res.ok) { alert(data.error || 'Unlock failed'); return; }
   window.location.reload();
+}
+
+// ── Trade Picks ──────────────────────────────────────────────────────────
+let TRADE_DATA = { ownership: {}, trades: [] };
+
+function pickLabel(overallPick, info) {
+  return `R${info.round} · Pick ${info.pick_in_round} (#${overallPick} overall)`;
+}
+
+async function refreshTrades() {
+  const res = await fetch('/api/draft/trades');
+  if (!res.ok) return;
+  TRADE_DATA = await res.json();
+  renderTradePickers();
+  renderPendingTrades();
+}
+
+function renderTradePickers() {
+  const giveList = document.getElementById('trade-give-list');
+  const receiveList = document.getElementById('trade-receive-list');
+  if (!giveList || !receiveList) return;
+  const targetId = parseInt(document.getElementById('trade-target-select').value, 10) || null;
+
+  const renderList = (el, ownerId) => {
+    if (!ownerId) { el.innerHTML = '<div class="trade-pick-empty">Select a manager above.</div>'; return; }
+    const picks = Object.entries(TRADE_DATA.ownership)
+      .filter(([, info]) => info.manager_id === ownerId)
+      .sort((a, b) => Number(a[0]) - Number(b[0]));
+    if (!picks.length) { el.innerHTML = '<div class="trade-pick-empty">No picks currently owned.</div>'; return; }
+    el.innerHTML = picks.map(([overall, info]) => `
+      <label class="trade-pick-item">
+        <input type="checkbox" value="${overall}" />
+        ${pickLabel(overall, info)}
+      </label>
+    `).join('');
+  };
+
+  renderList(giveList, CURRENT_MANAGER_ID);
+  renderList(receiveList, targetId);
+}
+
+async function proposeTrade() {
+  const errEl = document.getElementById('trade-propose-error');
+  errEl.style.display = 'none';
+  if (!CURRENT_MANAGER_ID) { alert('Log in first to propose a trade.'); return; }
+  const targetId = parseInt(document.getElementById('trade-target-select').value, 10) || null;
+  if (!targetId) { errEl.textContent = 'Pick a manager to trade with.'; errEl.style.display = 'block'; return; }
+
+  const givePicks = Array.from(document.querySelectorAll('#trade-give-list input:checked')).map(cb => parseInt(cb.value, 10));
+  const receivePicks = Array.from(document.querySelectorAll('#trade-receive-list input:checked')).map(cb => parseInt(cb.value, 10));
+  if (!givePicks.length && !receivePicks.length) { errEl.textContent = 'Select at least one pick to trade.'; errEl.style.display = 'block'; return; }
+
+  const res = await fetch('/api/draft/trade/propose', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target_manager_id: targetId, give_picks: givePicks, receive_picks: receivePicks })
+  });
+  const data = await res.json();
+  if (!res.ok) { errEl.textContent = data.error || 'Could not propose trade.'; errEl.style.display = 'block'; return; }
+  document.getElementById('trade-target-select').value = '';
+  renderTradePickers();
+  refreshTrades();
+}
+
+function renderPendingTrades() {
+  const wrap = document.getElementById('pending-trades-list');
+  if (!wrap) return;
+  const pending = TRADE_DATA.trades.filter(t => t.status === 'pending');
+  if (!pending.length) { wrap.innerHTML = '<div class="trade-pick-empty">No pending trades.</div>'; return; }
+
+  wrap.innerHTML = pending.map(t => {
+    const giveItems = t.items.filter(it => it.from_manager_id === t.proposer_manager_id);
+    const receiveItems = t.items.filter(it => it.from_manager_id === t.target_manager_id);
+    const fmt = items => items.map(it => `#${it.overall_pick}`).join(', ') || 'nothing';
+    const isTarget = CURRENT_MANAGER_ID === t.target_manager_id;
+    const isProposer = CURRENT_MANAGER_ID === t.proposer_manager_id;
+    let actions = '';
+    if (isTarget) {
+      actions = `<button type="button" class="primary-btn" onclick="respondTrade(${t.id}, 'accept')">Accept</button>
+                  <button type="button" class="action-btn" onclick="respondTrade(${t.id}, 'decline')">Decline</button>`;
+    } else if (isProposer) {
+      actions = `<button type="button" class="action-btn" onclick="respondTrade(${t.id}, 'cancel')">Cancel</button>`;
+    }
+    return `
+      <div class="pending-trade-card">
+        <strong>${t.proposer_name}</strong> ↔ <strong>${t.target_name}</strong>
+        <div class="trade-dir">${t.proposer_name} gives: ${fmt(giveItems)}</div>
+        <div class="trade-dir">${t.target_name} gives: ${fmt(receiveItems)}</div>
+        ${actions ? `<div style="margin-top:8px;display:flex;gap:8px">${actions}</div>` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+async function respondTrade(tradeId, action) {
+  if (!CURRENT_MANAGER_ID) { alert('Log in first.'); return; }
+  const res = await fetch(`/api/draft/trade/${tradeId}/${action}`, { method: 'POST' });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Could not update trade.'); return; }
+  refreshTrades();
+}
+
+if (DRAFT_STATUS === 'ready') {
+  refreshTrades();
 }
 
 // ── Filters ──────────────────────────────────────────────────────────────
