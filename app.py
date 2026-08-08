@@ -1889,12 +1889,31 @@ def player_history():
     })
 
 
+def count_active_roster_slots(conn, manager_id, gw):
+    """Count of a manager's non-IR (starter + bench) roster spots active at
+    gw. IR doesn't count against the 15-man cap — moving someone to a
+    previously-empty IR slot effectively opens a 16th spot to add into
+    without needing to drop anyone."""
+    row = conn.execute("""
+        SELECT COUNT(*) AS cnt FROM rosters
+        WHERE manager_id=? AND gw_start<=? AND (gw_end IS NULL OR gw_end>=?)
+          AND slot_type IN ('starter', 'bench')
+    """, (manager_id, gw, gw)).fetchone()
+    return row['cnt']
+
+
 def execute_roster_swap(conn, manager_id, add_player, drop_player, gw, source):
     """
     Core roster swap: drop `drop_player` from manager_id's roster and add
     `add_player` in their place. If the incoming player is eligible for the
     outgoing player's exact slot, they inherit it; otherwise they land on the
     bench. Follows the open-ended roster range model (gw_start=gw, gw_end=NULL).
+
+    `drop_player` may be None/falsy — a pure add, only allowed when the
+    manager has an open non-IR roster spot (see count_active_roster_slots).
+    The incoming player always lands on the bench in that case, since
+    there's no outgoing slot to inherit.
+
     Shared by the instant Add/Drop endpoint and the waiver processing
     algorithm — `source` tags the resulting transaction ('roster_swap' or
     'waiver_claim'). Returns (True, {slot_type, position_slot}) on success or
@@ -1902,25 +1921,30 @@ def execute_roster_swap(conn, manager_id, add_player, drop_player, gw, source):
     """
     c = conn.cursor()
 
-    drop_row = c.execute("""
-        SELECT id, slot_type, position_slot FROM rosters
-        WHERE manager_id=? AND player_name=?
-          AND gw_start <= ? AND (gw_end IS NULL OR gw_end >= ?)
-    """, (manager_id, drop_player, gw, gw)).fetchone()
+    drop_row = None
+    if drop_player:
+        drop_row = c.execute("""
+            SELECT id, slot_type, position_slot FROM rosters
+            WHERE manager_id=? AND player_name=?
+              AND gw_start <= ? AND (gw_end IS NULL OR gw_end >= ?)
+        """, (manager_id, drop_player, gw, gw)).fetchone()
 
-    if not drop_row:
-        return False, {"error": f"{drop_player} is not on this roster"}
+        if not drop_row:
+            return False, {"error": f"{drop_player} is not on this roster"}
 
-    # A dropped player leaves the roster entirely — pass new_slot_type=None
-    # (not becoming a starter) so is_change_locked only blocks this when
-    # drop_row['slot_type'] is itself 'starter' (a locked starter can't be
-    # dropped); bench/IR players remain droppable regardless of their own
-    # kickoff, per the shared lock rule.
-    drop_club_row = c.execute("SELECT club FROM players WHERE name=?", (drop_player,)).fetchone()
-    drop_club = drop_club_row['club'] if drop_club_row else None
-    locked, reason = is_change_locked(conn, DRAFT_SEASON, gw, drop_club, drop_row['slot_type'], None)
-    if locked:
-        return False, {"error": reason}
+        # A dropped player leaves the roster entirely — pass new_slot_type=None
+        # (not becoming a starter) so is_change_locked only blocks this when
+        # drop_row['slot_type'] is itself 'starter' (a locked starter can't be
+        # dropped); bench/IR players remain droppable regardless of their own
+        # kickoff, per the shared lock rule.
+        drop_club_row = c.execute("SELECT club FROM players WHERE name=?", (drop_player,)).fetchone()
+        drop_club = drop_club_row['club'] if drop_club_row else None
+        locked, reason = is_change_locked(conn, DRAFT_SEASON, gw, drop_club, drop_row['slot_type'], None)
+        if locked:
+            return False, {"error": reason}
+    else:
+        if count_active_roster_slots(conn, manager_id, gw) >= PLAYER_PICKS_PER_TEAM:
+            return False, {"error": "Your roster is full — drop a player to add someone new (or free up a spot by moving someone to IR)."}
 
     owned = c.execute("""
         SELECT 1 FROM rosters
@@ -1935,18 +1959,19 @@ def execute_roster_swap(conn, manager_id, add_player, drop_player, gw, source):
         WHERE p.name = ?
     """, (add_player,)).fetchall()}
 
-    if drop_row['position_slot'] in eligible:
+    if drop_row and drop_row['position_slot'] in eligible:
         new_slot_type = drop_row['slot_type']
         new_position_slot = drop_row['position_slot']
     else:
         new_slot_type = 'bench'
         new_position_slot = sorted(eligible)[0] if eligible else None
 
-    # Close out the dropped player's open roster row.
-    c.execute("UPDATE rosters SET gw_end=? WHERE id=?", (gw - 1 if gw > 1 else gw, drop_row['id']))
-    if gw == 1:
-        # Nothing to close before GW1 — just delete the row instead of a zero-length range.
-        c.execute("DELETE FROM rosters WHERE id=?", (drop_row['id'],))
+    if drop_row:
+        # Close out the dropped player's open roster row.
+        c.execute("UPDATE rosters SET gw_end=? WHERE id=?", (gw - 1 if gw > 1 else gw, drop_row['id']))
+        if gw == 1:
+            # Nothing to close before GW1 — just delete the row instead of a zero-length range.
+            c.execute("DELETE FROM rosters WHERE id=?", (drop_row['id'],))
 
     c.execute("""
         INSERT INTO rosters (manager_id, player_name, slot_type, position_slot, gw_start, gw_end)
@@ -1963,8 +1988,9 @@ def execute_roster_swap(conn, manager_id, add_player, drop_player, gw, source):
     # skip here to avoid a duplicate, less-detailed entry for the same pick.
     if not source.endswith('_transfer_draft'):
         action = 'waiver_claim' if source == 'waiver_claim' else 'add_drop'
-        log_audit(conn, manager_id, 'roster', action,
-                  f"{gw_change_label(conn, DRAFT_SEASON, gw)} — Added {add_player}, dropped {drop_player}",
+        summary = f"{gw_change_label(conn, DRAFT_SEASON, gw)} — Added {add_player}"
+        summary += f", dropped {drop_player}" if drop_player else " (no drop — had an open roster spot)"
+        log_audit(conn, manager_id, 'roster', action, summary,
                   {"added": add_player, "dropped": drop_player, "gw": gw, "source": source})
 
     return True, {"slot_type": new_slot_type, "position_slot": new_position_slot}
@@ -1974,11 +2000,11 @@ def execute_roster_swap(conn, manager_id, add_player, drop_player, gw, source):
 def swap_roster_player():
     data = request.get_json() or {}
     manager_id  = current_manager_id()
-    drop_player = data.get('drop_player')
+    drop_player = data.get('drop_player') or None
     add_player  = data.get('add_player')
     gw          = data.get('gw')
 
-    if not all([drop_player, add_player, gw]):
+    if not add_player or not gw:
         return jsonify({"error": "Missing required fields"}), 400
 
     conn = get_db()
@@ -2123,10 +2149,10 @@ def waiver_claim():
     data = request.get_json() or {}
     manager_id  = current_manager_id()
     add_player  = data.get('add_player')
-    drop_player = data.get('drop_player')
+    drop_player = data.get('drop_player') or None
     gw          = data.get('gw')
 
-    if not all([add_player, drop_player, gw]):
+    if not add_player or not gw:
         return jsonify({"error": "Missing required fields"}), 400
 
     conn = get_db()
@@ -2150,13 +2176,17 @@ def waiver_claim():
             conn.execute("ROLLBACK")
             return jsonify({"error": f"{add_player} is already owned"}), 409
 
-        drop_row = conn.execute("""
-            SELECT id FROM rosters WHERE manager_id=? AND player_name=?
-              AND gw_start <= ? AND (gw_end IS NULL OR gw_end >= ?)
-        """, (manager_id, drop_player, gw, gw)).fetchone()
-        if not drop_row:
+        if drop_player:
+            drop_row = conn.execute("""
+                SELECT id FROM rosters WHERE manager_id=? AND player_name=?
+                  AND gw_start <= ? AND (gw_end IS NULL OR gw_end >= ?)
+            """, (manager_id, drop_player, gw, gw)).fetchone()
+            if not drop_row:
+                conn.execute("ROLLBACK")
+                return jsonify({"error": f"{drop_player} is not on this roster"}), 404
+        elif count_active_roster_slots(conn, manager_id, gw) >= PLAYER_PICKS_PER_TEAM:
             conn.execute("ROLLBACK")
-            return jsonify({"error": f"{drop_player} is not on this roster"}), 404
+            return jsonify({"error": "Your roster is full — drop a player to submit this claim (or free up a spot by moving someone to IR)."}), 409
 
         next_priority = conn.execute("""
             SELECT COALESCE(MAX(priority), 0) + 1 FROM waiver_claims
@@ -2167,8 +2197,9 @@ def waiver_claim():
             INSERT INTO waiver_claims (window_id, manager_id, add_player, drop_player, priority, status, created_at)
             VALUES (?, ?, ?, ?, ?, 'pending', ?)
         """, (window['id'], manager_id, add_player, drop_player, next_priority, now_eastern_naive().isoformat()))
-        log_audit(conn, manager_id, 'waiver', 'claim_submitted',
-                  f"Submitted waiver claim: add {add_player}, drop {drop_player}",
+        claim_summary = f"Submitted waiver claim: add {add_player}"
+        claim_summary += f", drop {drop_player}" if drop_player else " (no drop — had an open roster spot)"
+        log_audit(conn, manager_id, 'waiver', 'claim_submitted', claim_summary,
                   {"add_player": add_player, "drop_player": drop_player, "gw": gw})
         conn.commit()
         return jsonify({"status": "ok"})
@@ -2237,8 +2268,9 @@ def waiver_claim_delete(claim_id):
         if claim['manager_id'] != current_manager_id():
             return jsonify({"error": "Only the manager who submitted this claim can cancel it"}), 403
         conn.execute("DELETE FROM waiver_claims WHERE id=?", (claim_id,))
-        log_audit(conn, claim['manager_id'], 'waiver', 'cancel_claim',
-                  f"Cancelled waiver claim: add {claim['add_player']}, drop {claim['drop_player']}")
+        cancel_summary = f"Cancelled waiver claim: add {claim['add_player']}"
+        cancel_summary += f", drop {claim['drop_player']}" if claim['drop_player'] else " (no drop)"
+        log_audit(conn, claim['manager_id'], 'waiver', 'cancel_claim', cancel_summary)
         conn.commit()
         return jsonify({"status": "ok"})
     except Exception as e:

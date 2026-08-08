@@ -219,7 +219,7 @@ def create_schema(conn):
         window_id INTEGER NOT NULL,
         manager_id INTEGER NOT NULL,
         add_player TEXT NOT NULL,
-        drop_player TEXT NOT NULL,
+        drop_player TEXT,
         priority INTEGER NOT NULL,
         status TEXT NOT NULL DEFAULT 'pending',
         fail_reason TEXT,

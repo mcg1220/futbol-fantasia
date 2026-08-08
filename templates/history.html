@@ -167,7 +167,7 @@
             <td style="cursor:grab;color:var(--text-muted)">⠿</td>
             <td>{{ cl.priority }}</td>
             <td style="text-align:left">{{ cl.add_player }}</td>
-            <td style="text-align:left">{{ cl.drop_player }}</td>
+            <td style="text-align:left">{{ cl.drop_player or '—' }}</td>
             <td>
               <button type="button" class="action-btn" onclick="reorderClaim({{ cl.id }}, 'up')">↑</button>
               <button type="button" class="action-btn" onclick="reorderClaim({{ cl.id }}, 'down')">↓</button>
@@ -239,7 +239,7 @@
                 <td>{{ cl.sequence_number or '—' }}</td>
                 <td style="text-align:left">{{ cl.manager_name }} — {{ cl.team_name }}</td>
                 <td style="text-align:left">{{ cl.add_player }}</td>
-                <td style="text-align:left">{{ cl.drop_player }}</td>
+                <td style="text-align:left">{{ cl.drop_player or '—' }}</td>
                 <td>{% if cl.status == 'success' %}✅{% elif cl.status == 'failed' %}❌{% else %}⏳{% endif %} {{ cl.status }}</td>
                 <td style="text-align:left;color:var(--text-secondary)">{{ cl.fail_reason or '' }}</td>
               </tr>
@@ -446,7 +446,11 @@ async function openDropModal(playerName, mode, title) {
   try {
     const res = await fetch(`/api/manager/${CURRENT_MANAGER_ID}/roster`);
     const roster = await res.json();
-    rosterDiv.innerHTML = renderRosterPicker(roster) || '<div class="empty-state">No roster players found.</div>';
+    const activeCount = roster.filter(r => r.slot_type === 'starter' || r.slot_type === 'bench').length;
+    const roomButton = activeCount < 15
+      ? `<button type="button" class="primary-btn" style="width:100%;margin-bottom:12px" onclick="confirmSwap(null)">✅ Add without dropping — you have an open roster spot</button>`
+      : '';
+    rosterDiv.innerHTML = roomButton + (renderRosterPicker(roster) || (roomButton ? '' : '<div class="empty-state">No roster players found.</div>'));
   } catch (e) {
     rosterDiv.innerHTML = '<div class="empty-state">Could not load roster — try closing and reopening this dialog.</div>';
     console.error(e);
@@ -485,8 +489,12 @@ async function confirmSwap(dropPlayer) {
       return;
     }
     const message = pendingMode === 'claim'
-      ? `🟡 Waiver claim submitted — ${pendingAdd} for ${dropPlayer}. Processes when the window closes.`
-      : `✅ Added ${pendingAdd}, dropped ${dropPlayer}.`;
+      ? (dropPlayer
+          ? `🟡 Waiver claim submitted — ${pendingAdd} for ${dropPlayer}. Processes when the window closes.`
+          : `🟡 Waiver claim submitted — ${pendingAdd} added, no drop needed. Processes when the window closes.`)
+      : (dropPlayer
+          ? `✅ Added ${pendingAdd}, dropped ${dropPlayer}.`
+          : `✅ Added ${pendingAdd} — no drop needed, you had an open roster spot.`);
     sessionStorage.setItem('addDropConfirmation', JSON.stringify({ message, ts: Date.now() }));
     window.location.reload();
   } catch (e) {
