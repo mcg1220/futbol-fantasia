@@ -1139,6 +1139,10 @@ tr:nth-child(3) .rank-num, tr:nth-child(4) .rank-num { color: var(--pl-magenta);
 .link-preview-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
 .link-preview-url { font-size: 12px; }
 .meme-post-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+.shortlist-star {
+  border: none; background: none; cursor: pointer; font-size: 15px;
+  padding: 2px 4px; line-height: 1; vertical-align: middle;
+}
 .meme-reaction-btn {
   border: 1px solid var(--border); background: var(--bg-card); border-radius: 999px;
   padding: 4px 10px; font-size: 13px; cursor: pointer; transition: border-color 0.15s, background 0.15s;

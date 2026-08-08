@@ -103,6 +103,17 @@ def current_manager_id():
     return session.get('manager_id')
 
 
+def get_my_shortlist(conn):
+    """Player names the logged-in manager has starred — [] if not logged in.
+    Used by the Main Draft pool and the Add/Drop watchlist, which both
+    render the same underlying per-manager shortlist."""
+    manager_id = current_manager_id()
+    if not manager_id:
+        return []
+    rows = conn.execute("SELECT player_name FROM shortlists WHERE manager_id=?", (manager_id,)).fetchall()
+    return [r['player_name'] for r in rows]
+
+
 @app.context_processor
 def inject_current_manager():
     manager_id = session.get('manager_id')
@@ -1775,6 +1786,7 @@ def history():
         """, (w['id'],)).fetchall()
         waiver_results.append({**dict(w), 'claims': [dict(cl) for cl in claims]})
 
+    my_shortlist = get_my_shortlist(conn)
     conn.close()
     return render_template('history.html',
         season=season,
@@ -1785,6 +1797,7 @@ def history():
         current_gw=current_gw,
         manager_roster=manager_roster,
         transactions=transactions,
+        my_shortlist=my_shortlist,
         waiver_window=dict(waiver_window) if waiver_window else None,
         waiver_order=waiver_order,
         my_claims=my_claims,
@@ -2461,6 +2474,36 @@ def compute_full_player_stats(conn):
     return totals_2025, eligibility_by_player, stat_sums, projections
 
 
+# ── Shortlist ────────────────────────────────────────────────────────────────
+
+@app.route('/api/shortlist/toggle', methods=['POST'])
+def toggle_shortlist():
+    manager_id = current_manager_id()
+    data = request.get_json() or {}
+    player_name = data.get('player_name')
+    if not player_name:
+        return jsonify({"error": "Missing player_name"}), 400
+
+    conn = get_db()
+    existing = conn.execute(
+        "SELECT id FROM shortlists WHERE manager_id=? AND player_name=?", (manager_id, player_name)
+    ).fetchone()
+
+    if existing:
+        conn.execute("DELETE FROM shortlists WHERE id=?", (existing['id'],))
+        toggled_on = False
+    else:
+        conn.execute(
+            "INSERT INTO shortlists (manager_id, player_name, added_at) VALUES (?, ?, ?)",
+            (manager_id, player_name, now_eastern_naive().isoformat())
+        )
+        toggled_on = True
+
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok", "on": toggled_on})
+
+
 @app.route('/draft')
 def draft_page():
     conn = get_db()
@@ -2506,6 +2549,7 @@ def draft_page():
     current_gw = get_current_gw(conn, DRAFT_SEASON)
     all_player_names = [r['name'] for r in conn.execute("SELECT name FROM players ORDER BY name").fetchall()]
     current_pl_clubs = get_current_pl_clubs(conn)
+    my_shortlist = get_my_shortlist(conn)
     conn.close()
     return render_template('draft.html',
         state=dict(state),
@@ -2521,6 +2565,7 @@ def draft_page():
         stat_cols=STAT_COLS,
         all_player_names=all_player_names,
         current_pl_clubs=current_pl_clubs,
+        my_shortlist=my_shortlist,
     )
 
 

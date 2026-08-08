@@ -41,6 +41,12 @@
       </div>
       <div style="display:flex;flex-direction:column;gap:6px">
         <label class="gw-jump-label">&nbsp;</label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="shortlist-only-checkbox" onchange="applyFilters()" /> ⭐ Shortlist only
+        </label>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="gw-jump-label">&nbsp;</label>
         <button type="button" class="action-btn" id="toggle-2025-btn" onclick="toggle2025()">Hide 2025–26 stats</button>
       </div>
     </div>
@@ -65,7 +71,7 @@
         </thead>
         <tbody>
           {% for p in browse_players %}
-          <tr class="browse-row" data-player="{{ p.name|lower }} {{ p.club|lower }}" data-name="{{ p.name }}" data-owner="{{ p.owner_manager_id or '' }}" data-eligibility="{{ p.eligibility|join(',') }}">
+          <tr class="browse-row" data-player="{{ p.name|lower }} {{ p.club|lower }}" data-name="{{ p.name }}" data-owner="{{ p.owner_manager_id or '' }}" data-eligibility="{{ p.eligibility|join(',') }}" data-shortlisted="{{ '1' if p.name in my_shortlist else '' }}">
             <td style="text-align:left;font-weight:600" onclick="toggleHistory('{{ p.name }}')" class="player-name-cell">
               <span class="expand-caret">▸</span> {{ p.name }}
             </td>
@@ -93,6 +99,7 @@
             <td>{{ '%.2f'|format(p.pts_2026_27) }}</td>
             <td>{{ '%.2f'|format(p.avg_2026_27) }}</td>
             <td class="browse-action-cell">
+              <button type="button" class="shortlist-star" onclick="toggleShortlist('{{ p.name }}', this)" title="Shortlist">{{ '⭐' if p.name in my_shortlist else '☆' }}</button>
               {% if not p.owner_manager_id and as_manager_id %}
                 {% if waiver_window %}
                 <button type="button" class="action-btn add-btn" onclick="startClaim('{{ p.name }}')">Claim</button>
@@ -287,6 +294,29 @@
 <script>
 const CURRENT_GW = {{ current_gw }};
 const CURRENT_MANAGER_ID = {{ current_manager_id|tojson }};
+const MY_SHORTLIST = new Set({{ my_shortlist|tojson }});
+
+// ── Shortlist ────────────────────────────────────────────────────────────────
+async function toggleShortlist(playerName, btn) {
+  if (!CURRENT_MANAGER_ID) { alert('Log in first to shortlist a player.'); return; }
+  const res = await fetch('/api/shortlist/toggle', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ player_name: playerName })
+  });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Could not update shortlist.'); return; }
+  if (data.on) {
+    MY_SHORTLIST.add(playerName);
+    btn.textContent = '⭐';
+  } else {
+    MY_SHORTLIST.delete(playerName);
+    btn.textContent = '☆';
+  }
+  const row = btn.closest('tr.browse-row');
+  if (row) row.setAttribute('data-shortlisted', data.on ? '1' : '');
+  if (document.getElementById('shortlist-only-checkbox').checked) applyFilters();
+}
 
 const TABS = ['browse', 'myclaims', 'waiverorder', 'waiverresults', 'transactions'];
 function showTab(name) {
@@ -323,11 +353,13 @@ applyHide2025(localStorage.getItem('hide2025') === 'true');
 function applyFilters() {
   const q = document.getElementById('player-search').value.toLowerCase();
   const wantedPositions = Array.from(document.querySelectorAll('.position-checkbox:checked')).map(cb => cb.value);
+  const shortlistOnly = document.getElementById('shortlist-only-checkbox').checked;
   document.querySelectorAll('#browse-table tbody tr.browse-row').forEach(row => {
     const nameMatch = row.getAttribute('data-player').includes(q);
     const eligibility = row.getAttribute('data-eligibility').split(',');
     const posMatch = wantedPositions.every(pos => eligibility.includes(pos));
-    const match = nameMatch && posMatch;
+    const shortlistMatch = !shortlistOnly || MY_SHORTLIST.has(row.getAttribute('data-name'));
+    const match = nameMatch && posMatch && shortlistMatch;
     row.style.display = match ? '' : 'none';
     const hist = row.nextElementSibling;
     if (hist && !match) hist.style.display = 'none';

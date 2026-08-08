@@ -343,6 +343,17 @@ def create_schema(conn):
     """)
 
     c.execute("""
+    CREATE TABLE IF NOT EXISTS shortlists (
+        id INTEGER PRIMARY KEY,
+        manager_id INTEGER NOT NULL,
+        player_name TEXT NOT NULL,
+        added_at TEXT NOT NULL,
+        UNIQUE(manager_id, player_name),
+        FOREIGN KEY (manager_id) REFERENCES managers(id)
+    )
+    """)
+
+    c.execute("""
     CREATE TABLE IF NOT EXISTS audit_log (
         id INTEGER PRIMARY KEY,
         manager_id INTEGER,

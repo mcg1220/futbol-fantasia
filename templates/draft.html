@@ -155,6 +155,12 @@
           <input type="checkbox" id="hide-drafted-checkbox" onchange="applyFilters()" /> Hide drafted players
         </label>
       </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="gw-jump-label">&nbsp;</label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="shortlist-only-checkbox" onchange="applyFilters()" /> ⭐ Shortlist only
+        </label>
+      </div>
     </div>
 
     <div class="table-wrap pool-table-wrap">
@@ -180,8 +186,10 @@
           <tr class="pool-row" data-player="{{ p.name|lower }} {{ p.club|lower }}"
               data-eligibility="{{ p.eligibility|join(',') }}" data-name="{{ p.name }}"
               data-owner="{{ p.owner_manager_id or '' }}"
+              data-shortlisted="{{ '1' if p.name in my_shortlist else '' }}"
               id="pool-row-{{ p.name|replace(' ', '_') }}">
             <td class="pool-action-cell pool-sticky-col pool-sticky-0">
+              <button type="button" class="shortlist-star" onclick="toggleShortlist('{{ p.name }}', this)" title="Shortlist">{{ '⭐' if p.name in my_shortlist else '☆' }}</button>
               {% if not p.owner_manager_id %}
               <button type="button" class="action-btn" onclick="startDraftPick('{{ p.name }}')">Draft</button>
               {% endif %}
@@ -303,6 +311,7 @@ const POSITION_TARGETS = {{ position_targets|tojson }};
 const MANAGERS = {{ managers|tojson }};
 const CURRENT_MANAGER_ID = {{ current_manager_id|tojson }};
 const CURRENT_MANAGER_NAME = {{ current_manager_name|tojson }};
+const MY_SHORTLIST = new Set({{ my_shortlist|tojson }});
 const CURRENT_GW = {{ current_gw }};
 const STAT_COLS = {{ stat_cols|tojson }};
 const ALL_PLAYER_NAMES = {{ all_player_names|tojson }};
@@ -376,6 +385,7 @@ function applyFilters() {
   const q = document.getElementById('player-search').value.toLowerCase();
   const wantedPositions = Array.from(document.querySelectorAll('.position-checkbox:checked')).map(cb => cb.value);
   const hideDrafted = document.getElementById('hide-drafted-checkbox').checked;
+  const shortlistOnly = document.getElementById('shortlist-only-checkbox').checked;
   const viewAsId = document.getElementById('view-as-select').value;
   document.querySelectorAll('#pool-table tbody tr.pool-row').forEach(row => {
     const owner = row.getAttribute('data-owner');
@@ -383,13 +393,36 @@ function applyFilters() {
     const eligibility = row.getAttribute('data-eligibility').split(',');
     const posMatch = wantedPositions.every(pos => eligibility.includes(pos));
     const draftedMatch = !hideDrafted || !owner;
+    const shortlistMatch = !shortlistOnly || MY_SHORTLIST.has(row.getAttribute('data-name'));
     const viewAsMatch = !viewAsId || !owner || owner === viewAsId;
-    const match = nameMatch && posMatch && draftedMatch && viewAsMatch;
+    const match = nameMatch && posMatch && draftedMatch && shortlistMatch && viewAsMatch;
     row.style.display = match ? '' : 'none';
     row.classList.toggle('pool-row-mine', !!(viewAsId && owner === viewAsId));
     const hist = row.nextElementSibling;
     if (hist && !match) hist.style.display = 'none';
   });
+}
+
+// ── Shortlist ────────────────────────────────────────────────────────────
+async function toggleShortlist(playerName, btn) {
+  if (!CURRENT_MANAGER_ID) { alert('Log in first to shortlist a player.'); return; }
+  const res = await fetch('/api/shortlist/toggle', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ player_name: playerName })
+  });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Could not update shortlist.'); return; }
+  if (data.on) {
+    MY_SHORTLIST.add(playerName);
+    btn.textContent = '⭐';
+  } else {
+    MY_SHORTLIST.delete(playerName);
+    btn.textContent = '☆';
+  }
+  const row = btn.closest('tr.pool-row');
+  if (row) row.setAttribute('data-shortlisted', data.on ? '1' : '');
+  if (document.getElementById('shortlist-only-checkbox').checked) applyFilters();
 }
 
 // ── Sorting (keeps each pool row paired with its history row) ────────────
