@@ -1572,6 +1572,23 @@ def update_roster_slot():
         conn.close()
         return jsonify({"error": reason}), 403
 
+    # Roster shape is fixed: exactly 15 non-IR (starter + bench) plus at most
+    # 1 IR slot — IR is a single reserved spot, not extra bench space, so
+    # both directions of crossing that boundary need checking here.
+    if new_slot_type == 'ir' and row['slot_type'] != 'ir':
+        existing_ir = c.execute("""
+            SELECT 1 FROM rosters
+            WHERE manager_id=? AND slot_type='ir'
+              AND gw_start<=? AND (gw_end IS NULL OR gw_end>=?)
+        """, (manager_id, gw, gw)).fetchone()
+        if existing_ir:
+            conn.close()
+            return jsonify({"error": "Only one player can be on IR at a time."}), 409
+    elif row['slot_type'] == 'ir' and new_slot_type != 'ir':
+        if count_active_roster_slots(conn, manager_id, gw) >= PLAYER_PICKS_PER_TEAM:
+            conn.close()
+            return jsonify({"error": "Your active roster is already full (15) — drop a player before moving this one off IR."}), 409
+
     if row['gw_start'] == gw:
         # A row already starts exactly at this gw (either it's always been
         # this gw's row, or a prior edit already split it here) — just

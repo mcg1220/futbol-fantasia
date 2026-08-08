@@ -471,11 +471,13 @@ function closeDropModal() {
 }
 
 async function confirmSwap(dropPlayer) {
+  const addedPlayer = pendingAdd;
+  const mode = pendingMode;
   try {
-    const url = pendingMode === 'claim' ? '/api/waiver/claim' : '/api/roster/swap';
-    const body = pendingMode === 'claim'
-      ? { add_player: pendingAdd, drop_player: dropPlayer, gw: CURRENT_GW }
-      : { drop_player: dropPlayer, add_player: pendingAdd, gw: CURRENT_GW };
+    const url = mode === 'claim' ? '/api/waiver/claim' : '/api/roster/swap';
+    const body = mode === 'claim'
+      ? { add_player: addedPlayer, drop_player: dropPlayer, gw: CURRENT_GW }
+      : { drop_player: dropPlayer, add_player: addedPlayer, gw: CURRENT_GW };
 
     const res = await fetch(url, {
       method: 'POST',
@@ -485,16 +487,16 @@ async function confirmSwap(dropPlayer) {
     const data = await res.json();
     closeDropModal();
     if (!res.ok) {
-      alert(data.error || (pendingMode === 'claim' ? 'Claim failed' : 'Swap failed'));
+      alert(data.error || (mode === 'claim' ? 'Claim failed' : 'Swap failed'));
       return;
     }
-    const message = pendingMode === 'claim'
+    const message = mode === 'claim'
       ? (dropPlayer
-          ? `🟡 Waiver claim submitted — ${pendingAdd} for ${dropPlayer}. Processes when the window closes.`
-          : `🟡 Waiver claim submitted — ${pendingAdd} added, no drop needed. Processes when the window closes.`)
+          ? `🟡 Waiver claim submitted — ${addedPlayer} for ${dropPlayer}. Processes when the window closes.`
+          : `🟡 Waiver claim submitted — ${addedPlayer} added, no drop needed. Processes when the window closes.`)
       : (dropPlayer
-          ? `✅ Added ${pendingAdd}, dropped ${dropPlayer}.`
-          : `✅ Added ${pendingAdd} — no drop needed, you had an open roster spot.`);
+          ? `✅ Added ${addedPlayer}, dropped ${dropPlayer}.`
+          : `✅ Added ${addedPlayer} — no drop needed, you had an open roster spot.`);
     sessionStorage.setItem('addDropConfirmation', JSON.stringify({ message, ts: Date.now() }));
     window.location.reload();
   } catch (e) {
