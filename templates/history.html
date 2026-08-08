@@ -47,6 +47,12 @@
       </div>
       <div style="display:flex;flex-direction:column;gap:6px">
         <label class="gw-jump-label">&nbsp;</label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="hide-owned-checkbox" checked onchange="applyFilters()" /> Hide owned players
+        </label>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="gw-jump-label">&nbsp;</label>
         <button type="button" class="action-btn" id="toggle-2025-btn" onclick="toggle2025()">Hide 2025–26 stats</button>
       </div>
     </div>
@@ -354,12 +360,14 @@ function applyFilters() {
   const q = document.getElementById('player-search').value.toLowerCase();
   const wantedPositions = Array.from(document.querySelectorAll('.position-checkbox:checked')).map(cb => cb.value);
   const shortlistOnly = document.getElementById('shortlist-only-checkbox').checked;
+  const hideOwned = document.getElementById('hide-owned-checkbox').checked;
   document.querySelectorAll('#browse-table tbody tr.browse-row').forEach(row => {
     const nameMatch = row.getAttribute('data-player').includes(q);
     const eligibility = row.getAttribute('data-eligibility').split(',');
     const posMatch = wantedPositions.every(pos => eligibility.includes(pos));
     const shortlistMatch = !shortlistOnly || MY_SHORTLIST.has(row.getAttribute('data-name'));
-    const match = nameMatch && posMatch && shortlistMatch;
+    const ownedMatch = !hideOwned || !row.getAttribute('data-owner');
+    const match = nameMatch && posMatch && shortlistMatch && ownedMatch;
     row.style.display = match ? '' : 'none';
     const hist = row.nextElementSibling;
     if (hist && !match) hist.style.display = 'none';
@@ -367,13 +375,13 @@ function applyFilters() {
 }
 
 let sortState = {};
-function sortBrowse(colIndex) {
+function sortBrowse(colIndex, forceDir) {
   const table = document.getElementById('browse-table');
   const tbody = table.querySelector('tbody');
   const th = table.querySelectorAll('th')[colIndex];
   const isNum = th.getAttribute('data-type') === 'num';
 
-  const asc = sortState[colIndex] !== 'asc';
+  const asc = forceDir ? forceDir === 'asc' : sortState[colIndex] !== 'asc';
   sortState = { [colIndex]: asc ? 'asc' : 'desc' };
 
   // Keep each browse-row paired with its following history-row while sorting.
@@ -476,6 +484,10 @@ async function confirmSwap(dropPlayer) {
       alert(data.error || (pendingMode === 'claim' ? 'Claim failed' : 'Swap failed'));
       return;
     }
+    const message = pendingMode === 'claim'
+      ? `🟡 Waiver claim submitted — ${pendingAdd} for ${dropPlayer}. Processes when the window closes.`
+      : `✅ Added ${pendingAdd}, dropped ${dropPlayer}.`;
+    sessionStorage.setItem('addDropConfirmation', JSON.stringify({ message, ts: Date.now() }));
     window.location.reload();
   } catch (e) {
     alert('Something went wrong submitting this — check the console and try again.');
@@ -553,5 +565,24 @@ async function processWaivers() {
   if (!res.ok) { alert(data.error || 'Processing failed'); return; }
   window.location.reload();
 }
+
+if (document.getElementById('browse-table')) {
+  sortBrowse(5, 'desc');
+  applyFilters();
+}
+
+(function showPendingConfirmation() {
+  const raw = sessionStorage.getItem('addDropConfirmation');
+  if (!raw) return;
+  sessionStorage.removeItem('addDropConfirmation');
+  try {
+    const { message, ts } = JSON.parse(raw);
+    if (Date.now() - ts > 10000) return;  // stale — don't resurface on a later visit
+    const banner = document.getElementById('add-banner');
+    banner.textContent = message;
+    banner.style.display = '';
+    setTimeout(() => { banner.style.display = 'none'; }, 5000);
+  } catch (e) { /* malformed — ignore */ }
+})();
 </script>
 {% endblock %}

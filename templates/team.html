@@ -74,6 +74,7 @@
       <tr class="col-group-row">
         <th rowspan="2" style="text-align:left">Player</th>
         <th rowspan="2" style="text-align:left">Club</th>
+        <th rowspan="2" style="text-align:left">Eligible</th>
         <th rowspan="2">Slot</th>
         <th rowspan="2" style="text-align:left">GW Opponent</th>
         <th colspan="5" class="col-group-header col-group-gw">GW Points</th>
@@ -115,7 +116,7 @@
 
         {% if show_pos_groups and pos_label and pos_label != ns.cur_pos %}
           {% set ns.cur_pos = pos_label %}
-          <tr class="pos-group-row"><td colspan="12" class="pos-group-label">{{ pos_full }}</td></tr>
+          <tr class="pos-group-row"><td colspan="13" class="pos-group-label">{{ pos_full }}</td></tr>
         {% endif %}
 
         <tr class="player-row" onclick="toggleAccordion('{{ uid }}')">
@@ -123,6 +124,9 @@
           <td style="text-align:left">
             {% if club and badges.get(club) %}<img src="{{ badges[club] }}" class="club-badge" />{% endif %}
             {{ club or '—' }}
+          </td>
+          <td style="text-align:left">
+            {% for pos in (eligible or []) %}<span class="pos-badge">{{ pos }}</span>{% endfor %}
           </td>
           <td>
             <select class="slot-select pos-{{ pos_label if pos_label else 'BENCH' }}"
@@ -168,7 +172,7 @@
         </tr>
 
         <tr class="accordion-row" id="{{ uid }}" style="display:none">
-          <td colspan="12">
+          <td colspan="13">
             <div class="stat-accordion">
 
               <div class="stat-group">
@@ -271,6 +275,7 @@
       <tr>
         <th style="text-align:left">Player</th>
         <th style="text-align:left">Club</th>
+        <th style="text-align:left">Eligible</th>
         <th>Slot</th>
         <th style="text-align:left">Fixture</th>
       </tr>
@@ -291,6 +296,9 @@
           <td style="text-align:left">
             {% if club and badges.get(club) %}<img src="{{ badges[club] }}" class="club-badge" />{% endif %}
             {{ club or '—' }}
+          </td>
+          <td style="text-align:left">
+            {% for pos in (eligible or []) %}<span class="pos-badge">{{ pos }}</span>{% endfor %}
           </td>
           <td>
             <select class="slot-select pos-{{ pos_label if pos_label else 'BENCH' }}"

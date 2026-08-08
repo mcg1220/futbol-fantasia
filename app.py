@@ -1319,7 +1319,7 @@ def team(manager_id):
         """, player_names).fetchall()
         club_map = {r['player_name']: r['club'] for r in club_rows}
 
-    # Eligibility map: player_name -> set of eligible position codes
+    # Eligibility map: player_name -> sorted list of eligible position codes
     eligibility_map = {}
     if player_names:
         ph = ','.join('?' * len(player_names))
@@ -1331,6 +1331,7 @@ def team(manager_id):
         """, player_names).fetchall()
         for r in elig_rows:
             eligibility_map.setdefault(r['name'], set()).add(r['position'])
+        eligibility_map = {name: sorted(positions) for name, positions in eligibility_map.items()}
 
     season_fixtures = c.execute("""
         SELECT g.gw_number, f.match_id, f.home_club, f.away_club
@@ -1470,6 +1471,7 @@ def team(manager_id):
             """, plan_player_names).fetchall()
             for r in elig_rows:
                 plan_eligibility_map.setdefault(r['name'], set()).add(r['position'])
+            plan_eligibility_map = {name: sorted(positions) for name, positions in plan_eligibility_map.items()}
 
         plan_fixture_info = get_gw_fixture_info(conn, season, plan_gw)
         plan_kickoff_map = {club: (info['date'], info['time']) for club, info in plan_fixture_info.items()}
