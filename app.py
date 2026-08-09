@@ -49,7 +49,7 @@ MEMES_DIR           = os.path.join(os.path.dirname(__file__), 'static', 'uploads
 ALLOWED_MEME_EXTS   = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 sys.path.insert(0, SCRIPTS_DIR)
-from scoring_engine import calc_player_score, get_scoring_config, calc_bulk_season_totals, get_team_goals_conceded
+from scoring_engine import calc_player_score, get_scoring_config, calc_bulk_season_totals, get_team_goals_conceded, calc_team_score_for_gw
 
 SEASON_CUTOFF = 1983000  # raw_stats has no season column; WhoScored match_ids below this are 2025-26
 
@@ -468,6 +468,14 @@ def run_scraper_background(proc, gw, started_at, trigger='manual', watchdog_kill
             })
         else:
             save_scraper_run(gw, gw, started_at, completed_at, "complete", agg, trigger=trigger)
+            try:
+                fconn = get_db()
+                try:
+                    finalize_gw_results(fconn, gw, season=DRAFT_SEASON)
+                finally:
+                    fconn.close()
+            except Exception as e:
+                print(f"[finalize_gw_results] GW{gw} failed: {e}")
             write_scraper_status({
                 "status":       "complete",
                 "summary":      summary,
@@ -2247,6 +2255,92 @@ def check_position_counts(conn, manager_id, gw):
         if count != target:
             ok = False
     return {'positions': positions, 'ok': ok}
+
+
+def gw_fully_scraped(conn, season, gw_number):
+    """True only if every fixture in this gw has at least one raw_stats row
+    — i.e. the whole gameweek has actually been played and captured, not
+    just some of it. Deliberately independent of the scraper's own exit
+    code (which happens to already refuse to report "complete" for a
+    partially-played gw) so finalize_gw_results' safety doesn't silently
+    depend on that unrelated behavior staying the same."""
+    row = conn.execute("""
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN EXISTS (
+                   SELECT 1 FROM raw_stats rs WHERE rs.match_id = f.match_id
+               ) THEN 1 ELSE 0 END) AS scraped
+        FROM fixtures f
+        JOIN gameweeks g ON g.id = f.gw_id
+        WHERE g.season=? AND g.gw_number=?
+    """, (season, gw_number)).fetchone()
+    return row['total'] > 0 and row['total'] == row['scraped']
+
+
+def finalize_gw_results(conn, gw_number, season=DRAFT_SEASON):
+    """
+    Compute and persist final results for every matchup in a gameweek. A
+    manager whose starter lineup fails check_position_counts is forced to 0
+    for the gw regardless of what they actually earned — every player is
+    individually locked by the time the gw's last match kicks off, so the
+    formation check gives the same answer here (post-scrape) as it would
+    have at that exact instant. Idempotent: safe to call again for the same
+    gw (e.g. after a manual rescrape days later) — overwrites prior rows
+    rather than erroring or duplicating.
+
+    No-op if the gameweek isn't fully scraped yet (see gw_fully_scraped) —
+    win/loss/tie must never be decided off a partial gw, e.g. someone
+    pressing the scrape button mid-week while games are still to be played.
+    """
+    if not gw_fully_scraped(conn, season, gw_number):
+        return
+
+    gw_row = conn.execute(
+        "SELECT id FROM gameweeks WHERE season=? AND gw_number=?", (season, gw_number)
+    ).fetchone()
+    if not gw_row:
+        return
+    gw_id = gw_row['id']
+
+    matchups = conn.execute(
+        "SELECT id, team_a_id, team_b_id FROM matchups WHERE season=? AND gw_number=?",
+        (season, gw_number)
+    ).fetchall()
+
+    for mu in matchups:
+        scores = {}
+        for manager_id in (mu['team_a_id'], mu['team_b_id']):
+            raw_score, _ = calc_team_score_for_gw(conn, manager_id, gw_number, season=season)
+            formation_ok = check_position_counts(conn, manager_id, gw_number)['ok']
+            final_score = raw_score if formation_ok else 0.0
+            if not formation_ok:
+                log_audit(
+                    conn, manager_id, 'scoring', 'invalid_lineup_penalty',
+                    f"GW{gw_number}: lineup wasn't formation-valid at last kickoff — "
+                    f"score forced to 0 (would have been {round(raw_score, 2)})",
+                    {"gw_number": gw_number, "season": season, "raw_score": raw_score}
+                )
+            scores[manager_id] = final_score
+
+        score_a = scores[mu['team_a_id']]
+        score_b = scores[mu['team_b_id']]
+        if score_a > score_b:
+            outcome_a, outcome_b = (1, 0, 0), (0, 1, 0)
+        elif score_b > score_a:
+            outcome_a, outcome_b = (0, 1, 0), (1, 0, 0)
+        else:
+            outcome_a, outcome_b = (0, 0, 1), (0, 0, 1)
+
+        for manager_id, score, (win, loss, tie) in (
+            (mu['team_a_id'], score_a, outcome_a),
+            (mu['team_b_id'], score_b, outcome_b),
+        ):
+            conn.execute("DELETE FROM results WHERE gw_id=? AND manager_id=?", (gw_id, manager_id))
+            conn.execute("""
+                INSERT INTO results (gw_id, manager_id, matchup_id, fantasy_score, win, loss, tie)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (gw_id, manager_id, mu['id'], score, win, loss, tie))
+
+    conn.commit()
 
 # Single source of truth for the 21 raw-stat columns shown on the Main Draft
 # pool table and (via compute_full_player_stats) the Transfer Draft tables.

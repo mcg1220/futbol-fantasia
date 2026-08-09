@@ -383,7 +383,7 @@
     {% for pos, info in position_check.positions.items() %}
       {% if info.count != info.target %}{{ pos }}: {{ info.count }}/{{ info.target }}{% if info.count < info.target %} (need {{ info.target - info.count }} more){% else %} ({{ info.count - info.target }} too many){% endif %}{% if not loop.last %}, {% endif %}{% endif %}
     {% endfor %}
-    — you won't receive full stats for this gameweek unless it's corrected{% if not gw_locked %} before it locks{% endif %}.
+    — you'll score 0 points for this gameweek unless it's corrected{% if not gw_locked %} before it locks{% endif %}.
   </div>
   {% endif %}
 
@@ -425,7 +425,7 @@
     {% for pos, info in plan_position_check.positions.items() %}
       {% if info.count != info.target %}{{ pos }}: {{ info.count }}/{{ info.target }}{% if info.count < info.target %} (need {{ info.target - info.count }} more){% else %} ({{ info.count - info.target }} too many){% endif %}{% if not loop.last %}, {% endif %}{% endif %}
     {% endfor %}
-    — it won't receive full stats for GW{{ plan_gw }} unless corrected before it locks.
+    — it will score 0 points for GW{{ plan_gw }} unless corrected before it locks.
   </div>
   {% endif %}
 

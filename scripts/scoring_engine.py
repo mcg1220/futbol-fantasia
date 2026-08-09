@@ -257,7 +257,7 @@ def calc_bulk_season_totals(conn, season, match_id_filter=None):
     }
 
 
-def calc_team_score_for_gw(conn, manager_id, gw_number):
+def calc_team_score_for_gw(conn, manager_id, gw_number, season="2025-26"):
     """
     Calculate total fantasy score for a manager in a given GW.
     Returns (total_score, player_breakdown_list).
@@ -279,8 +279,8 @@ def calc_team_score_for_gw(conn, manager_id, gw_number):
     match_ids = [row[0] for row in c.execute("""
         SELECT f.match_id FROM fixtures f
         JOIN gameweeks g ON f.gw_id = g.id
-        WHERE g.gw_number = ?
-    """, (gw_number,)).fetchall()]
+        WHERE g.gw_number = ? AND f.season = ?
+    """, (gw_number, season)).fetchall()]
 
     total = 0.0
     breakdown = []
@@ -296,7 +296,7 @@ def calc_team_score_for_gw(conn, manager_id, gw_number):
             ).fetchone()
 
             if has_stats:
-                score, detail = calc_player_score(conn, player_name, match_id, position_slot)
+                score, detail = calc_player_score(conn, player_name, match_id, position_slot, season=season)
                 player_total += score
                 player_matches.append({
                     "match_id": match_id,
