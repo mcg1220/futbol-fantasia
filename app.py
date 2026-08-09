@@ -1525,33 +1525,19 @@ def team(manager_id):
     )
 
 
-@app.route('/api/roster/update', methods=['POST'])
-def update_roster_slot():
+def apply_slot_change(conn, manager_id, player_name, gw, new_slot_type, new_position_slot):
     """
-    Move a player between slots (starter position / bench / IR) for a given
-    gameweek — the current one from the main Team page, or a future one from
-    the Plan Future Lineup panel. Follows the same open-ended roster range
-    model as the draft and Player Add/Drop's swap endpoint (gw_start <= gw <=
-    gw_end-or-NULL), but — unlike the old version of this endpoint — SPLITS
-    the range at `gw` instead of editing the covering row in place, so a
-    change made for one gw can't silently rewrite the slot/position that was
-    actually live in other gws. Mirrors execute_roster_swap's split pattern.
-    The dropdown UI already restricts options to a player's real eligibility,
-    so no server-side eligibility rejection is needed here — but locking
-    (Part 3) is enforced below.
+    Move one player's roster row to a new slot for gw, splitting the
+    open-ended roster range at `gw` instead of editing the covering row in
+    place, so a change made for one gw can't silently rewrite the slot/
+    position that was actually live in other gws. Shared by the single-
+    player move (update_roster_slot) and the two-player swap
+    (execute_slot_swap) below — both need the identical split logic, just
+    applied once or twice.
+
+    Returns (ok, error_or_None, old_slot_type, old_position_slot). Does not
+    commit — caller commits.
     """
-    data = request.get_json() or {}
-    manager_id = current_manager_id()
-    player_name = data.get('player_name')
-    gw = data.get('gw')
-    new_slot_type = data.get('slot_type')
-    new_position_slot = data.get('position_slot')
-
-    if not all([player_name, gw, new_slot_type, new_position_slot]):
-        return jsonify({"error": "Missing required fields"}), 400
-    gw = int(gw)
-
-    conn = get_db()
     c = conn.cursor()
 
     row = c.execute("""
@@ -1561,33 +1547,14 @@ def update_roster_slot():
     """, (manager_id, player_name, gw, gw)).fetchone()
 
     if not row:
-        conn.close()
-        return jsonify({"error": "Roster row not found for this player/GW"}), 404
+        return False, f"{player_name} is not on this roster", None, None
 
     club_row = c.execute("SELECT club FROM players WHERE name=?", (player_name,)).fetchone()
     club = club_row['club'] if club_row else None
 
     locked, reason = is_change_locked(conn, DRAFT_SEASON, gw, club, row['slot_type'], new_slot_type)
     if locked:
-        conn.close()
-        return jsonify({"error": reason}), 403
-
-    # Roster shape is fixed: exactly 15 non-IR (starter + bench) plus at most
-    # 1 IR slot — IR is a single reserved spot, not extra bench space, so
-    # both directions of crossing that boundary need checking here.
-    if new_slot_type == 'ir' and row['slot_type'] != 'ir':
-        existing_ir = c.execute("""
-            SELECT 1 FROM rosters
-            WHERE manager_id=? AND slot_type='ir'
-              AND gw_start<=? AND (gw_end IS NULL OR gw_end>=?)
-        """, (manager_id, gw, gw)).fetchone()
-        if existing_ir:
-            conn.close()
-            return jsonify({"error": "Only one player can be on IR at a time."}), 409
-    elif row['slot_type'] == 'ir' and new_slot_type != 'ir':
-        if count_active_roster_slots(conn, manager_id, gw) >= PLAYER_PICKS_PER_TEAM:
-            conn.close()
-            return jsonify({"error": "Your active roster is already full (15) — drop a player before moving this one off IR."}), 409
+        return False, reason, None, None
 
     if row['gw_start'] == gw:
         # A row already starts exactly at this gw (either it's always been
@@ -1609,12 +1576,71 @@ def update_roster_slot():
             VALUES (?, ?, ?, ?, ?, ?)
         """, (manager_id, player_name, new_slot_type, new_position_slot, gw, row['gw_end']))
 
+    return True, None, row['slot_type'], row['position_slot']
+
+
+@app.route('/api/roster/update', methods=['POST'])
+def update_roster_slot():
+    """
+    Move a player between slots (starter position / bench / IR) for a given
+    gameweek — the current one from the main Team page, or a future one from
+    the Plan Future Lineup panel. The dropdown UI already restricts options
+    to a player's real eligibility, so no server-side eligibility rejection
+    is needed here — but locking and the IR/15-cap rules are enforced below.
+    """
+    data = request.get_json() or {}
+    manager_id = current_manager_id()
+    player_name = data.get('player_name')
+    gw = data.get('gw')
+    new_slot_type = data.get('slot_type')
+    new_position_slot = data.get('position_slot')
+
+    if not all([player_name, gw, new_slot_type, new_position_slot]):
+        return jsonify({"error": "Missing required fields"}), 400
+    gw = int(gw)
+
+    conn = get_db()
+
+    current = conn.execute("""
+        SELECT slot_type FROM rosters
+        WHERE manager_id=? AND player_name=?
+          AND gw_start <= ? AND (gw_end IS NULL OR gw_end >= ?)
+    """, (manager_id, player_name, gw, gw)).fetchone()
+    if not current:
+        conn.close()
+        return jsonify({"error": "Roster row not found for this player/GW"}), 404
+
+    # Roster shape is fixed: exactly 15 non-IR (starter + bench) plus at most
+    # 1 IR slot — IR is a single reserved spot, not extra bench space, so
+    # both directions of crossing that boundary need checking here.
+    if new_slot_type == 'ir' and current['slot_type'] != 'ir':
+        existing_ir = conn.execute("""
+            SELECT 1 FROM rosters
+            WHERE manager_id=? AND slot_type='ir'
+              AND gw_start<=? AND (gw_end IS NULL OR gw_end>=?)
+        """, (manager_id, gw, gw)).fetchone()
+        if existing_ir:
+            conn.close()
+            return jsonify({"error": "Only one player can be on IR at a time."}), 409
+    elif current['slot_type'] == 'ir' and new_slot_type != 'ir':
+        if count_active_roster_slots(conn, manager_id, gw) >= PLAYER_PICKS_PER_TEAM:
+            conn.close()
+            return jsonify({"error": "Your active roster is already full (15) — drop a player before moving this one off IR."}), 409
+
+    ok, err, old_slot_type, old_position_slot = apply_slot_change(
+        conn, manager_id, player_name, gw, new_slot_type, new_position_slot)
+    if not ok:
+        conn.close()
+        status = 404 if 'not on this roster' in err else 403
+        return jsonify({"error": err}), status
+
     log_audit(conn, manager_id, 'roster', 'lineup_change',
-              f"{gw_change_label(conn, DRAFT_SEASON, gw)} — Moved {player_name}: {row['slot_type']} ({row['position_slot']}) → {new_slot_type} ({new_position_slot})",
-              {"player": player_name, "gw": gw, "from": dict(row), "to": {"slot_type": new_slot_type, "position_slot": new_position_slot}})
+              f"{gw_change_label(conn, DRAFT_SEASON, gw)} — Moved {player_name}: {old_slot_type} ({old_position_slot}) → {new_slot_type} ({new_position_slot})",
+              {"player": player_name, "gw": gw, "from": {"slot_type": old_slot_type, "position_slot": old_position_slot},
+               "to": {"slot_type": new_slot_type, "position_slot": new_position_slot}})
     conn.commit()
 
-    counts = c.execute("""
+    counts = conn.execute("""
         SELECT position_slot, COUNT(*) as cnt
         FROM rosters
         WHERE manager_id=? AND gw_start <= ? AND (gw_end IS NULL OR gw_end >= ?) AND slot_type='starter'
@@ -1625,6 +1651,148 @@ def update_roster_slot():
 
     formation = {r['position_slot']: r['cnt'] for r in counts}
     return jsonify({"status": "ok", "formation": formation})
+
+
+def execute_slot_swap(conn, manager_id, player_a, player_b, gw):
+    """
+    Atomically swap two of a manager's own players' roster slots — each
+    inherits the other's exact slot_type/position_slot. Since total counts
+    are unchanged both before and after, this never needs the IR-singleton
+    or 15-man cap checks update_roster_slot enforces — a swap can't create
+    an invalid roster shape by construction. This is what makes both "swap
+    my IR player back in" (nobody else needs to move to IR first) and
+    "who can take this vacated starter slot" (any eligible teammate,
+    regardless of their current slot) work as a single action.
+    """
+    if player_a == player_b:
+        return False, {"error": "Can't swap a player with themselves."}
+
+    c = conn.cursor()
+    row_a = c.execute("""
+        SELECT slot_type, position_slot FROM rosters
+        WHERE manager_id=? AND player_name=? AND gw_start<=? AND (gw_end IS NULL OR gw_end>=?)
+    """, (manager_id, player_a, gw, gw)).fetchone()
+    row_b = c.execute("""
+        SELECT slot_type, position_slot FROM rosters
+        WHERE manager_id=? AND player_name=? AND gw_start<=? AND (gw_end IS NULL OR gw_end>=?)
+    """, (manager_id, player_b, gw, gw)).fetchone()
+
+    if not row_a:
+        return False, {"error": f"{player_a} is not on this roster"}
+    if not row_b:
+        return False, {"error": f"{player_b} is not on this roster"}
+
+    # Whichever side lands in a starter slot must actually be eligible to
+    # play there — bench/IR destinations never require eligibility.
+    def eligible_positions(player_name):
+        return {r[0] for r in c.execute("""
+            SELECT pe.position FROM players p
+            JOIN player_eligibility pe ON pe.player_id = p.id
+            WHERE p.name = ?
+        """, (player_name,)).fetchall()}
+
+    if row_b['slot_type'] == 'starter' and row_b['position_slot'] not in eligible_positions(player_a):
+        return False, {"error": f"{player_a} isn't eligible for {row_b['position_slot']}."}
+    if row_a['slot_type'] == 'starter' and row_a['position_slot'] not in eligible_positions(player_b):
+        return False, {"error": f"{player_b} isn't eligible for {row_a['position_slot']}."}
+
+    ok, err, _, _ = apply_slot_change(conn, manager_id, player_a, gw, row_b['slot_type'], row_b['position_slot'])
+    if not ok:
+        return False, {"error": err}
+    ok, err, _, _ = apply_slot_change(conn, manager_id, player_b, gw, row_a['slot_type'], row_a['position_slot'])
+    if not ok:
+        return False, {"error": err}
+
+    log_audit(conn, manager_id, 'roster', 'slot_swap',
+              f"{gw_change_label(conn, DRAFT_SEASON, gw)} — Swapped {player_a} ({row_a['slot_type']}/{row_a['position_slot']}) "
+              f"↔ {player_b} ({row_b['slot_type']}/{row_b['position_slot']})",
+              {"player_a": player_a, "player_b": player_b, "gw": gw})
+    return True, {"status": "ok"}
+
+
+@app.route('/api/roster/swap_slots', methods=['POST'])
+def swap_roster_slots():
+    data = request.get_json() or {}
+    manager_id = current_manager_id()
+    player_a = data.get('player_a')
+    player_b = data.get('player_b')
+    gw = data.get('gw')
+
+    if not all([player_a, player_b, gw]):
+        return jsonify({"error": "Missing required fields"}), 400
+    gw = int(gw)
+
+    conn = get_db()
+    ok, result = execute_slot_swap(conn, manager_id, player_a, player_b, gw)
+    if not ok:
+        conn.close()
+        return jsonify(result), 409
+
+    conn.commit()
+    conn.close()
+    return jsonify(result)
+
+
+def execute_roster_drop(conn, manager_id, drop_player, gw, source='roster_drop'):
+    """
+    Release a player from the roster with no replacement — the mirror image
+    of execute_roster_swap's add-without-drop path, but for the drop side
+    alone. Frees a roster spot (to be filled later via Add/Drop, or left
+    open) without requiring an immediate replacement pick.
+    """
+    c = conn.cursor()
+
+    drop_row = c.execute("""
+        SELECT id, slot_type, position_slot FROM rosters
+        WHERE manager_id=? AND player_name=?
+          AND gw_start <= ? AND (gw_end IS NULL OR gw_end >= ?)
+    """, (manager_id, drop_player, gw, gw)).fetchone()
+    if not drop_row:
+        return False, {"error": f"{drop_player} is not on this roster"}
+
+    drop_club_row = c.execute("SELECT club FROM players WHERE name=?", (drop_player,)).fetchone()
+    drop_club = drop_club_row['club'] if drop_club_row else None
+    locked, reason = is_change_locked(conn, DRAFT_SEASON, gw, drop_club, drop_row['slot_type'], None)
+    if locked:
+        return False, {"error": reason}
+
+    c.execute("UPDATE rosters SET gw_end=? WHERE id=?", (gw - 1 if gw > 1 else gw, drop_row['id']))
+    if gw == 1:
+        c.execute("DELETE FROM rosters WHERE id=?", (drop_row['id'],))
+
+    c.execute("""
+        INSERT INTO transactions (manager_id, added_player, dropped_player, source, gw, season, created_at)
+        VALUES (?, NULL, ?, ?, ?, ?, ?)
+    """, (manager_id, drop_player, source, gw, DRAFT_SEASON, now_eastern_naive().isoformat()))
+
+    log_audit(conn, manager_id, 'roster', 'drop_only',
+              f"{gw_change_label(conn, DRAFT_SEASON, gw)} — Dropped {drop_player} (no replacement)",
+              {"dropped": drop_player, "gw": gw, "source": source})
+
+    return True, {"status": "ok"}
+
+
+@app.route('/api/roster/drop', methods=['POST'])
+def drop_roster_player():
+    data = request.get_json() or {}
+    manager_id = current_manager_id()
+    drop_player = data.get('player_name')
+    gw = data.get('gw')
+
+    if not drop_player or not gw:
+        return jsonify({"error": "Missing required fields"}), 400
+    gw = int(gw)
+
+    conn = get_db()
+    ok, result = execute_roster_drop(conn, manager_id, drop_player, gw)
+    if not ok:
+        conn.close()
+        status = 404 if 'not on this roster' in result['error'] else 403
+        return jsonify(result), status
+
+    conn.commit()
+    conn.close()
+    return jsonify(result)
 
 
 # ── Manager Profile (team name + photo) ─────────────────────────────────────

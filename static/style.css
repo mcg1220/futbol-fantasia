@@ -1096,6 +1096,12 @@ tr:nth-child(3) .rank-num, tr:nth-child(4) .rank-num { color: var(--pl-magenta);
 [data-theme="dark"] .lineup-warning { background: #2D2A00; color: #FDE68A; border-color: #CA8A04; }
 
 .lock-icon { margin-left: 6px; font-size: 13px; cursor: help; }
+.slot-action-btn {
+  border: none; background: none; cursor: pointer; font-size: 14px;
+  padding: 2px 4px; margin-left: 2px; line-height: 1; vertical-align: middle;
+  border-radius: var(--radius-sm);
+}
+.slot-action-btn:hover { background: var(--bg-row-alt); }
 
 /* ── Player History: browse table + expand + swap modal ─────────────────── */
 .player-name-cell { cursor: pointer; user-select: none; }

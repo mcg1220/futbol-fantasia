@@ -62,6 +62,14 @@
   <img id="photo-lightbox-img" src="" style="max-width:90vw;max-height:85vh;border-radius:12px" onclick="event.stopPropagation()" />
 </div>
 
+<div id="swap-modal" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <h3 id="swap-modal-title">Swap with...</h3>
+    <div id="swap-modal-roster"></div>
+    <button type="button" class="action-btn" onclick="closeSwapModal()">Cancel</button>
+  </div>
+</div>
+
 <!-- ── Roster macro ──────────────────────────────────────────────────────── -->
 {% macro roster_table(players, show_pos_groups, id_prefix, table_id) %}
 {% if players %}
@@ -155,6 +163,10 @@
               <option value="ir|ir"       {% if player.slot_type=='ir'    %}selected{% endif %} {% if gw_locked %}disabled{% endif %}>Injury Reserve</option>
             </select>
             {% if player_locked or gw_locked %}<span class="lock-icon" title="{% if gw_locked %}GW{{ current_gw }} is locked{% else %}Locked — match already kicked off{% endif %}">🔒</span>{% endif %}
+            {% if manager.id == current_manager_id %}
+            <button type="button" class="slot-action-btn" title="Swap with another player" onclick="event.stopPropagation(); startSwap('{{ player.player_name }}')">🔀</button>
+            <button type="button" class="slot-action-btn" title="Drop, no replacement" onclick="event.stopPropagation(); startDrop('{{ player.player_name }}')">🗑️</button>
+            {% endif %}
           </td>
           <td style="text-align:left">
             {% if opp != '—' and badges.get(opp) %}<img src="{{ badges[opp] }}" class="club-badge" />{% endif %}
@@ -426,6 +438,7 @@
 {% endif %}
 
 <script src="{{ url_for('static', filename='js/game_log.js') }}"></script>
+<script src="{{ url_for('static', filename='js/roster_picker.js') }}"></script>
 <script>
 function toggleAccordion(id) {
   const row = document.getElementById(id);
@@ -487,6 +500,10 @@ function toggle2025() {
 applyHide2025(localStorage.getItem('hide2025') === 'true');
 
 // ── Lineup editing ─────────────────────────────────────────────────────────
+const ELIGIBILITY_MAP = {{ eligibility_map|tojson }};
+const CURRENT_MANAGER_ID = {{ current_manager_id|tojson }};
+const CURRENT_GW = {{ current_gw }};
+
 async function updateSlot(selectEl) {
   const [position_slot, slot_type] = selectEl.value.split('|');
   const player_name = selectEl.dataset.player;
@@ -519,6 +536,93 @@ async function updateSlot(selectEl) {
   } catch (e) {
     alert('Network error saving change — please try again.');
     selectEl.disabled = false;
+  }
+}
+
+// ── Position swap ───────────────────────────────────────────────────────────
+let swapPlayer = null;
+
+async function startSwap(playerName) {
+  swapPlayer = playerName;
+  document.getElementById('swap-modal-title').textContent = `Swap ${playerName} with...`;
+  const rosterDiv = document.getElementById('swap-modal-roster');
+  rosterDiv.innerHTML = 'Loading roster...';
+  document.getElementById('swap-modal').style.display = 'flex';
+
+  if (!CURRENT_MANAGER_ID) { alert('Log in first.'); return; }
+  try {
+    const res = await fetch(`/api/manager/${CURRENT_MANAGER_ID}/roster`);
+    const roster = await res.json();
+    const me = roster.find(r => r.player_name === playerName);
+    const myEligibility = ELIGIBILITY_MAP[playerName] || [];
+
+    // A candidate is swappable if whichever side lands in a starter slot is
+    // actually eligible for it — bench/IR destinations never require
+    // eligibility. This is the same rule the server re-checks.
+    const candidates = roster.filter(r => {
+      if (r.player_name === playerName) return false;
+      if (me.slot_type === 'starter') {
+        const rEligibility = ELIGIBILITY_MAP[r.player_name] || [];
+        if (!rEligibility.includes(me.position_slot)) return false;
+      }
+      if (r.slot_type === 'starter' && !myEligibility.includes(r.position_slot)) return false;
+      return true;
+    });
+
+    rosterDiv.innerHTML = renderRosterPicker(candidates, 'confirmSlotSwap') || '<div class="empty-state">No eligible teammates to swap with.</div>';
+  } catch (e) {
+    rosterDiv.innerHTML = '<div class="empty-state">Could not load roster — try closing and reopening this dialog.</div>';
+    console.error(e);
+  }
+}
+
+function closeSwapModal() {
+  swapPlayer = null;
+  document.getElementById('swap-modal').style.display = 'none';
+}
+
+async function confirmSlotSwap(otherPlayer) {
+  try {
+    const res = await fetch('/api/roster/swap_slots', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ player_a: swapPlayer, player_b: otherPlayer, gw: CURRENT_GW })
+    });
+    const data = await res.json();
+    closeSwapModal();
+    if (!res.ok) {
+      alert(data.error || 'Swap failed');
+      return;
+    }
+    sessionStorage.setItem('teamPageScrollY', window.scrollY);
+    window.location.reload();
+  } catch (e) {
+    alert('Network error saving change — please try again.');
+    console.error(e);
+  }
+}
+
+// ── Drop, no replacement ─────────────────────────────────────────────────────
+async function startDrop(playerName) {
+  if (!CURRENT_MANAGER_ID) { alert('Log in first.'); return; }
+  if (!confirm(`Drop ${playerName}? This frees a roster spot but doesn't add anyone in their place.`)) return;
+
+  try {
+    const res = await fetch('/api/roster/drop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ player_name: playerName, gw: CURRENT_GW })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || 'Drop failed');
+      return;
+    }
+    sessionStorage.setItem('teamPageScrollY', window.scrollY);
+    window.location.reload();
+  } catch (e) {
+    alert('Network error saving change — please try again.');
+    console.error(e);
   }
 }
 
