@@ -276,7 +276,7 @@
             <td>{{ t.created_at[:16].replace('T', ' ') }}</td>
             <td>{{ t.manager_name }} — {{ t.team_name }}</td>
             <td>{% if t.added_player %}<span style="color:#2e7d32">+ {{ t.added_player }}</span>{% endif %}</td>
-            <td>{% if t.dropped_player %}<span style="color:#c62828">− {{ t.dropped_player }}</span>{% endif %}</td>
+            <td>{% if t.dropped_player %}<span style="color:#c62828">− {{ t.dropped_player }}</span>{% elif t.added_player %}<span style="color:var(--text-secondary)">Open Roster Spot</span>{% endif %}</td>
             <td>{{ t.source }}</td>
           </tr>
           {% endfor %}

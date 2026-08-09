@@ -144,6 +144,7 @@
                     {% if starter_locked %}disabled{% endif %}
                     {% if player_locked or gw_locked %}title="🔒 {% if gw_locked %}GW{{ current_gw }} is locked{% else %}Locked — match already kicked off{% endif %}"{% endif %}
                     onclick="event.stopPropagation()"
+                    onfocus="this.dataset.prevValue=this.value"
                     onchange="updateSlot(this)">
               <optgroup label="Starting XI">
                 {% if not eligible or 'FW' in eligible %}
@@ -319,6 +320,7 @@
                     data-gw="{{ gw }}"
                     {% if starter_locked %}disabled{% endif %}
                     {% if player_locked or plan_gw_locked %}title="🔒 {% if plan_gw_locked %}GW{{ gw }} is locked{% else %}Locked — match already kicked off{% endif %}"{% endif %}
+                    onfocus="this.dataset.prevValue=this.value"
                     onchange="updateSlot(this)">
               <optgroup label="Starting XI">
                 {% if not eligible or 'FW' in eligible %}
@@ -525,6 +527,7 @@ async function updateSlot(selectEl) {
 
     if (!res.ok) {
       alert('Could not save change: ' + (data.error || 'unknown error'));
+      if (selectEl.dataset.prevValue) selectEl.value = selectEl.dataset.prevValue;
       selectEl.disabled = false;
       return;
     }
