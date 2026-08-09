@@ -338,6 +338,9 @@
               <option value="ir|ir"       {% if player.slot_type=='ir'    %}selected{% endif %} {% if plan_gw_locked %}disabled{% endif %}>Injury Reserve</option>
             </select>
             {% if player_locked or plan_gw_locked %}<span class="lock-icon" title="{% if plan_gw_locked %}GW{{ gw }} is locked{% else %}Locked — match already kicked off{% endif %}">🔒</span>{% endif %}
+            {% if manager.id == current_manager_id %}
+            <button type="button" class="slot-action-btn" title="Swap with another player" onclick="startSwap('{{ player.player_name }}', {{ gw }})">🔀</button>
+            {% endif %}
           </td>
           <td style="text-align:left">
             {% if not club or not opp %}—
@@ -500,7 +503,7 @@ function toggle2025() {
 applyHide2025(localStorage.getItem('hide2025') === 'true');
 
 // ── Lineup editing ─────────────────────────────────────────────────────────
-const ELIGIBILITY_MAP = {{ eligibility_map|tojson }};
+const ELIGIBILITY_MAP = {{ all_eligibility_map|tojson }};
 const CURRENT_MANAGER_ID = {{ current_manager_id|tojson }};
 const CURRENT_GW = {{ current_gw }};
 
@@ -541,9 +544,11 @@ async function updateSlot(selectEl) {
 
 // ── Position swap ───────────────────────────────────────────────────────────
 let swapPlayer = null;
+let swapGw = null;
 
-async function startSwap(playerName) {
+async function startSwap(playerName, gw) {
   swapPlayer = playerName;
+  swapGw = gw || CURRENT_GW;
   document.getElementById('swap-modal-title').textContent = `Swap ${playerName} with...`;
   const rosterDiv = document.getElementById('swap-modal-roster');
   rosterDiv.innerHTML = 'Loading roster...';
@@ -551,7 +556,7 @@ async function startSwap(playerName) {
 
   if (!CURRENT_MANAGER_ID) { alert('Log in first.'); return; }
   try {
-    const res = await fetch(`/api/manager/${CURRENT_MANAGER_ID}/roster`);
+    const res = await fetch(`/api/manager/${CURRENT_MANAGER_ID}/roster?gw=${swapGw}`);
     const roster = await res.json();
     const me = roster.find(r => r.player_name === playerName);
     const myEligibility = ELIGIBILITY_MAP[playerName] || [];
@@ -578,6 +583,7 @@ async function startSwap(playerName) {
 
 function closeSwapModal() {
   swapPlayer = null;
+  swapGw = null;
   document.getElementById('swap-modal').style.display = 'none';
 }
 
@@ -586,7 +592,7 @@ async function confirmSlotSwap(otherPlayer) {
     const res = await fetch('/api/roster/swap_slots', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ player_a: swapPlayer, player_b: otherPlayer, gw: CURRENT_GW })
+      body: JSON.stringify({ player_a: swapPlayer, player_b: otherPlayer, gw: swapGw })
     });
     const data = await res.json();
     closeSwapModal();

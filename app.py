@@ -1504,6 +1504,7 @@ def team(manager_id):
         kickoff_map={club: (info['date'], info['time']) for club, info in fixture_info.items()},
         points_map=points_map,
         eligibility_map=eligibility_map,
+        all_eligibility_map={**eligibility_map, **(plan_eligibility_map if plan_gw else {})},
         badges=badges,
         season=season,
         scraper_status=read_scraper_status(),
@@ -1864,17 +1865,20 @@ def upload_manager_photo():
 
 @app.route('/api/manager/<int:manager_id>/roster')
 def manager_roster_api(manager_id):
-    """Fresh current roster for a manager — used by the Add/Claim drop-player
-    picker so it never shows a stale list from an earlier page load."""
+    """Fresh roster for a manager at a given gw (defaults to the current
+    one) — used by the Add/Claim drop-player picker (always current gw, so
+    it never shows a stale list from an earlier page load) and the Team
+    page's swap picker, which passes ?gw= for the Plan Future Lineup panel
+    so swap candidates reflect that future gw's planned roster, not today's."""
     conn = get_db()
     season = DRAFT_SEASON
-    current_gw = get_current_gw(conn, season)
+    gw = request.args.get('gw', type=int) or get_current_gw(conn, season)
     rows = conn.execute("""
         SELECT player_name, slot_type, position_slot
         FROM rosters
         WHERE manager_id=? AND gw_start <= ? AND (gw_end IS NULL OR gw_end >= ?)
         ORDER BY slot_type, position_slot
-    """, (manager_id, current_gw, current_gw)).fetchall()
+    """, (manager_id, gw, gw)).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
