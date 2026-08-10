@@ -198,6 +198,10 @@
       </div>
       <div style="display:flex;flex-direction:column;gap:6px">
         <label class="gw-jump-label">&nbsp;</label>
+        <button type="button" class="action-btn" onclick="exportTableToCSV('pool-table', 'pool-row', 'draft_pool_stats.csv')">⬇️ Export CSV</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="gw-jump-label">&nbsp;</label>
         <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer">
           <input type="checkbox" id="shortlist-only-checkbox" onchange="applyFilters()" /> ⭐ Shortlist only
         </label>
@@ -208,7 +212,7 @@
       <table class="data-table pool-table-sticky" id="pool-table">
         <thead>
           <tr>
-            <th class="pool-sticky-col pool-sticky-0">Draft</th>
+            <th class="pool-sticky-col pool-sticky-0 no-export">Draft</th>
             <th class="sortable pool-sticky-col pool-sticky-1" style="text-align:left" onclick="sortPool(1)">Player</th>
             <th class="sortable pool-sticky-col pool-sticky-2" style="text-align:left" onclick="sortPool(2)">Club</th>
             <th class="pool-sticky-col pool-sticky-3" style="text-align:left">Eligible</th>
@@ -346,6 +350,7 @@
 
 <script src="{{ url_for('static', filename='js/game_log.js') }}"></script>
 <script src="{{ url_for('static', filename='js/roster_picker.js') }}"></script>
+<script src="{{ url_for('static', filename='js/export_csv.js') }}"></script>
 <script>
 const DRAFT_STATUS = "{{ state.status }}";
 const POSITION_TARGETS = {{ position_targets|tojson }};

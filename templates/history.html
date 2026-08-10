@@ -56,6 +56,10 @@
         <label class="gw-jump-label">&nbsp;</label>
         <button type="button" class="action-btn" id="toggle-2025-btn" onclick="toggle2025()">Hide 2025–26 stats</button>
       </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="gw-jump-label">&nbsp;</label>
+        <button type="button" class="action-btn" onclick="exportTableToCSV('browse-table', 'browse-row', 'player_stats.csv')">⬇️ Export CSV</button>
+      </div>
     </div>
 
     <div id="add-banner" style="display:none;padding:10px 14px;margin-bottom:12px;border-radius:8px;background:var(--pl-magenta-bg);color:var(--pl-magenta);font-size:13px;font-weight:600"></div>
@@ -73,7 +77,7 @@
             <th class="sortable col-2025" data-type="num" onclick="sortBrowse(6)">2025–26 Avg</th>
             <th class="sortable" data-type="num" onclick="sortBrowse(7)">2026–27 FPts</th>
             <th class="sortable" data-type="num" onclick="sortBrowse(8)">2026–27 Avg</th>
-            <th>Action</th>
+            <th class="no-export">Action</th>
           </tr>
         </thead>
         <tbody>
@@ -375,6 +379,7 @@
 <script src="{{ url_for('static', filename='js/game_log.js') }}"></script>
 <script src="{{ url_for('static', filename='js/roster_picker.js') }}"></script>
 <script src="{{ url_for('static', filename='js/trades.js') }}"></script>
+<script src="{{ url_for('static', filename='js/export_csv.js') }}"></script>
 <script>
 const CURRENT_GW = {{ current_gw }};
 const CURRENT_MANAGER_ID = {{ current_manager_id|tojson }};
