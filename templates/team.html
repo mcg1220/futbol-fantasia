@@ -54,6 +54,9 @@
         {% endfor %}
       </select>
       <button type="button" class="action-btn" id="toggle-2025-btn" onclick="toggle2025()" style="margin-left:8px">Hide 2025–26 stats</button>
+      {% if current_manager_id and manager.id != current_manager_id %}
+      <button type="button" class="action-btn" onclick="openTradeModal({{ manager.id }})" style="margin-left:8px">🤝 Propose Trade</button>
+      {% endif %}
     </div>
   </div>
 </section>
@@ -67,6 +70,27 @@
     <h3 id="swap-modal-title">Swap with...</h3>
     <div id="swap-modal-roster"></div>
     <button type="button" class="action-btn" onclick="closeSwapModal()">Cancel</button>
+  </div>
+</div>
+
+<div id="trade-modal" class="modal-overlay" style="display:none">
+  <div class="modal-box modal-box-wide">
+    <h3>Propose Trade</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+      <div>
+        <div class="gw-jump-label" id="trade-give-title">Your players to give</div>
+        <div id="trade-give-list"></div>
+      </div>
+      <div>
+        <div class="gw-jump-label" id="trade-receive-title">Their players to receive</div>
+        <div id="trade-receive-list"></div>
+      </div>
+    </div>
+    <div id="trade-propose-error" style="color:var(--pl-magenta);font-size:13px;margin-top:8px;display:none"></div>
+    <div style="margin-top:14px;display:flex;gap:8px">
+      <button type="button" class="primary-btn" onclick="proposeTrade()">Propose Trade</button>
+      <button type="button" class="action-btn" onclick="closeTradeModal()">Cancel</button>
+    </div>
   </div>
 </div>
 
@@ -444,6 +468,7 @@
 
 <script src="{{ url_for('static', filename='js/game_log.js') }}"></script>
 <script src="{{ url_for('static', filename='js/roster_picker.js') }}"></script>
+<script src="{{ url_for('static', filename='js/trades.js') }}"></script>
 <script>
 function toggleAccordion(id) {
   const row = document.getElementById(id);

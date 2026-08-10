@@ -1993,10 +1993,35 @@ def history():
         """, (w['id'],)).fetchall()
         waiver_results.append({**dict(w), 'claims': [dict(cl) for cl in claims]})
 
+    my_trades = []
+    if as_manager_id:
+        my_trades = [dict(t) for t in c.execute("""
+            SELECT t.*, p.name AS proposer_name, p.team_name AS proposer_team,
+                   tgt.name AS target_name, tgt.team_name AS target_team
+            FROM player_trades t
+            JOIN managers p ON p.id = t.proposer_manager_id
+            JOIN managers tgt ON tgt.id = t.target_manager_id
+            WHERE t.season=? AND (t.proposer_manager_id=? OR t.target_manager_id=?)
+            ORDER BY t.created_at DESC
+        """, (season, as_manager_id, as_manager_id)).fetchall()]
+        trade_items_by_trade = {}
+        for it in c.execute("""
+            SELECT * FROM player_trade_items
+            WHERE trade_id IN (
+                SELECT id FROM player_trades
+                WHERE season=? AND (proposer_manager_id=? OR target_manager_id=?)
+            )
+        """, (season, as_manager_id, as_manager_id)).fetchall():
+            trade_items_by_trade.setdefault(it['trade_id'], []).append(dict(it))
+        for t in my_trades:
+            t['give_items'] = [i for i in trade_items_by_trade.get(t['id'], []) if i['from_manager_id'] == t['proposer_manager_id']]
+            t['receive_items'] = [i for i in trade_items_by_trade.get(t['id'], []) if i['from_manager_id'] == t['target_manager_id']]
+
     my_shortlist = get_my_shortlist(conn)
     conn.close()
     return render_template('history.html',
         season=season,
+        my_trades=my_trades,
         scraper_status=read_scraper_status(),
         browse_players=browse_players,
         managers=managers,
@@ -2221,6 +2246,243 @@ def swap_roster_player():
         "slot_type": info['slot_type'],
         "position_slot": info['position_slot'],
     })
+
+
+# ── In-season player trades ─────────────────────────────────────────────────
+# Trade rostered players between two managers — propose (N-for-M), the other
+# manager accepts or declines. Mirrors the Main Draft pick-trade feature
+# (player_trades/player_trade_items parallel draft_pick_trades/items) but for
+# real roster players at any point during the season, not just pre-draft.
+
+def execute_player_trade(conn, trade_id, acting_manager_id):
+    """
+    Applies an accepted player trade. Re-validates every item's current
+    ownership and lock state (guards the propose->accept race — a player
+    may have been dropped or traded away in the meantime), then checks the
+    15-man cap for both managers, and only mutates rosters if everything
+    passes (all-or-nothing). Every incoming player always lands on the
+    bench (no natural 1:1 slot mapping for an N-for-M trade), so no
+    eligibility check is needed — bench never requires it.
+
+    Returns (True, None) or (False, {"error": "..."}). Does not commit —
+    caller commits.
+    """
+    c = conn.cursor()
+    gw = get_current_gw(conn, DRAFT_SEASON)
+
+    # Checked unconditionally, not just per-item, since a one-sided trade
+    # (one side gives nothing) would otherwise skip every per-item lock
+    # check on that side and let a fully-locked gw's trade through.
+    if is_gw_locked(conn, DRAFT_SEASON, gw):
+        return False, {"error": f"GW{gw} is locked — this trade can no longer be applied."}
+
+    items = c.execute("SELECT * FROM player_trade_items WHERE trade_id=?", (trade_id,)).fetchall()
+
+    rows_by_item = {}
+    for it in items:
+        row = c.execute("""
+            SELECT id, slot_type, position_slot FROM rosters
+            WHERE manager_id=? AND player_name=?
+              AND gw_start<=? AND (gw_end IS NULL OR gw_end>=?)
+        """, (it['from_manager_id'], it['player_name'], gw, gw)).fetchone()
+        if not row:
+            return False, {"error": f"{it['player_name']} has changed hands since this trade was proposed."}
+        rows_by_item[it['id']] = row
+
+        if row['slot_type'] == 'starter':
+            club_row = c.execute("SELECT club FROM players WHERE name=?", (it['player_name'],)).fetchone()
+            club = club_row['club'] if club_row else None
+            locked, reason = is_change_locked(conn, DRAFT_SEASON, gw, club, 'starter', None)
+            if locked:
+                return False, {"error": reason}
+
+    for manager_id in {mid for it in items for mid in (it['from_manager_id'], it['to_manager_id'])}:
+        outgoing_active = sum(
+            1 for it in items
+            if it['from_manager_id'] == manager_id and rows_by_item[it['id']]['slot_type'] in ('starter', 'bench')
+        )
+        incoming = sum(1 for it in items if it['to_manager_id'] == manager_id)
+        new_active = count_active_roster_slots(conn, manager_id, gw) - outgoing_active + incoming
+        if new_active > 15:
+            manager_name = c.execute("SELECT name FROM managers WHERE id=?", (manager_id,)).fetchone()['name']
+            return False, {"error": f"{manager_name}'s roster would exceed the 15-player limit."}
+
+    now = now_eastern_naive().isoformat()
+    for it in items:
+        row = rows_by_item[it['id']]
+        eligible = {r[0] for r in c.execute("""
+            SELECT pe.position FROM players p
+            JOIN player_eligibility pe ON pe.player_id = p.id
+            WHERE p.name = ?
+        """, (it['player_name'],)).fetchall()}
+
+        c.execute("UPDATE rosters SET gw_end=? WHERE id=?", (gw - 1 if gw > 1 else gw, row['id']))
+        if gw == 1:
+            c.execute("DELETE FROM rosters WHERE id=?", (row['id'],))
+
+        c.execute("""
+            INSERT INTO rosters (manager_id, player_name, slot_type, position_slot, gw_start, gw_end)
+            VALUES (?, ?, 'bench', ?, ?, NULL)
+        """, (it['to_manager_id'], it['player_name'], sorted(eligible)[0] if eligible else None, gw))
+
+        c.execute("""
+            INSERT INTO transactions (manager_id, added_player, dropped_player, source, gw, season, created_at)
+            VALUES (?, NULL, ?, 'player_trade', ?, ?, ?)
+        """, (it['from_manager_id'], it['player_name'], gw, DRAFT_SEASON, now))
+        c.execute("""
+            INSERT INTO transactions (manager_id, added_player, dropped_player, source, gw, season, created_at)
+            VALUES (?, ?, NULL, 'player_trade', ?, ?, ?)
+        """, (it['to_manager_id'], it['player_name'], gw, DRAFT_SEASON, now))
+
+    trade = c.execute("SELECT * FROM player_trades WHERE id=?", (trade_id,)).fetchone()
+    proposer = c.execute("SELECT name FROM managers WHERE id=?", (trade['proposer_manager_id'],)).fetchone()['name']
+    target = c.execute("SELECT name FROM managers WHERE id=?", (trade['target_manager_id'],)).fetchone()['name']
+    give = [it['player_name'] for it in items if it['from_manager_id'] == trade['proposer_manager_id']]
+    receive = [it['player_name'] for it in items if it['from_manager_id'] == trade['target_manager_id']]
+    log_audit(conn, acting_manager_id, 'player_trade', 'accept',
+              f"Trade accepted: {proposer} gave {', '.join(give) or 'nothing'} to {target} for {', '.join(receive) or 'nothing'}",
+              {"trade_id": trade_id, "give": give, "receive": receive})
+
+    return True, None
+
+
+def _get_pending_player_trade(conn, trade_id):
+    return conn.execute("SELECT * FROM player_trades WHERE id=? AND status='pending'", (trade_id,)).fetchone()
+
+
+@app.route('/api/trade/propose', methods=['POST'])
+def player_trade_propose():
+    manager_id = current_manager_id()
+    data = request.get_json() or {}
+    try:
+        target_manager_id = int(data.get('target_manager_id'))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Missing or invalid target_manager_id."}), 400
+    give_players = data.get('give_players') or []
+    receive_players = data.get('receive_players') or []
+
+    if target_manager_id == int(manager_id):
+        return jsonify({"error": "You can't trade with yourself."}), 400
+    if not give_players and not receive_players:
+        return jsonify({"error": "Select at least one player to trade."}), 400
+    combined = give_players + receive_players
+    if len(combined) != len(set(combined)):
+        return jsonify({"error": "The same player can't appear on both sides of a trade."}), 400
+
+    conn = get_db()
+    target = conn.execute("SELECT id, name FROM managers WHERE id=?", (target_manager_id,)).fetchone()
+    if not target:
+        conn.close()
+        return jsonify({"error": "Unknown manager."}), 400
+
+    gw = get_current_gw(conn, DRAFT_SEASON)
+    items = []
+    for player_name in give_players:
+        owner = conn.execute("""
+            SELECT manager_id FROM rosters
+            WHERE player_name=? AND gw_start<=? AND (gw_end IS NULL OR gw_end>=?)
+        """, (player_name, gw, gw)).fetchone()
+        if not owner or owner['manager_id'] != int(manager_id):
+            conn.close()
+            return jsonify({"error": f"You don't currently own {player_name}."}), 409
+        items.append((player_name, int(manager_id), target_manager_id))
+    for player_name in receive_players:
+        owner = conn.execute("""
+            SELECT manager_id FROM rosters
+            WHERE player_name=? AND gw_start<=? AND (gw_end IS NULL OR gw_end>=?)
+        """, (player_name, gw, gw)).fetchone()
+        if not owner or owner['manager_id'] != target_manager_id:
+            conn.close()
+            return jsonify({"error": f"{target['name']} doesn't currently own {player_name}."}), 409
+        items.append((player_name, target_manager_id, int(manager_id)))
+
+    now = now_eastern_naive().isoformat()
+    cur = conn.execute(
+        "INSERT INTO player_trades (season, proposer_manager_id, target_manager_id, status, created_at) VALUES (?, ?, ?, 'pending', ?)",
+        (DRAFT_SEASON, manager_id, target_manager_id, now)
+    )
+    trade_id = cur.lastrowid
+    for player_name, from_id, to_id in items:
+        conn.execute(
+            "INSERT INTO player_trade_items (trade_id, player_name, from_manager_id, to_manager_id) VALUES (?, ?, ?, ?)",
+            (trade_id, player_name, from_id, to_id)
+        )
+
+    log_audit(conn, manager_id, 'player_trade', 'propose', f"Proposed a trade with {target['name']}",
+              {"trade_id": trade_id, "give_players": give_players, "receive_players": receive_players})
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok", "trade_id": trade_id})
+
+
+@app.route('/api/trade/<int:trade_id>/accept', methods=['POST'])
+def player_trade_accept(trade_id):
+    manager_id = current_manager_id()
+    conn = get_db()
+    trade = _get_pending_player_trade(conn, trade_id)
+    if not trade:
+        conn.close()
+        return jsonify({"error": "Trade not found or already resolved."}), 404
+    if trade['target_manager_id'] != int(manager_id):
+        conn.close()
+        return jsonify({"error": "Only the manager this trade was sent to can accept it."}), 403
+
+    ok, info = execute_player_trade(conn, trade_id, manager_id)
+    if not ok:
+        conn.close()
+        return jsonify(info), 409
+
+    conn.execute(
+        "UPDATE player_trades SET status='accepted', responded_at=? WHERE id=?",
+        (now_eastern_naive().isoformat(), trade_id)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok"})
+
+
+@app.route('/api/trade/<int:trade_id>/decline', methods=['POST'])
+def player_trade_decline(trade_id):
+    manager_id = current_manager_id()
+    conn = get_db()
+    trade = _get_pending_player_trade(conn, trade_id)
+    if not trade:
+        conn.close()
+        return jsonify({"error": "Trade not found or already resolved."}), 404
+    if trade['target_manager_id'] != int(manager_id):
+        conn.close()
+        return jsonify({"error": "Only the manager this trade was sent to can decline it."}), 403
+
+    conn.execute(
+        "UPDATE player_trades SET status='declined', responded_at=? WHERE id=?",
+        (now_eastern_naive().isoformat(), trade_id)
+    )
+    log_audit(conn, manager_id, 'player_trade', 'decline', f"Declined trade #{trade_id}", {"trade_id": trade_id})
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok"})
+
+
+@app.route('/api/trade/<int:trade_id>/cancel', methods=['POST'])
+def player_trade_cancel(trade_id):
+    manager_id = current_manager_id()
+    conn = get_db()
+    trade = _get_pending_player_trade(conn, trade_id)
+    if not trade:
+        conn.close()
+        return jsonify({"error": "Trade not found or already resolved."}), 404
+    if trade['proposer_manager_id'] != int(manager_id):
+        conn.close()
+        return jsonify({"error": "Only the manager who proposed this trade can cancel it."}), 403
+
+    conn.execute(
+        "UPDATE player_trades SET status='cancelled', responded_at=? WHERE id=?",
+        (now_eastern_naive().isoformat(), trade_id)
+    )
+    log_audit(conn, manager_id, 'player_trade', 'cancel', f"Cancelled trade #{trade_id}", {"trade_id": trade_id})
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok"})
 
 
 # ── Draft ────────────────────────────────────────────────────────────────────

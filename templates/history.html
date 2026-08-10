@@ -10,6 +10,7 @@
     <button type="button" class="tab-btn" id="tab-btn-myclaims" onclick="showTab('myclaims')">📝 My Claims</button>
     <button type="button" class="tab-btn" id="tab-btn-waiverorder" onclick="showTab('waiverorder')">🔀 Waiver Order</button>
     <button type="button" class="tab-btn" id="tab-btn-waiverresults" onclick="showTab('waiverresults')">📣 Waiver Results</button>
+    <button type="button" class="tab-btn" id="tab-btn-trades" onclick="showTab('trades')">🤝 Trades</button>
     <button type="button" class="tab-btn" id="tab-btn-transactions" onclick="showTab('transactions')">🧾 Transaction Log</button>
   </div>
 
@@ -112,6 +113,8 @@
                 {% else %}
                 <button type="button" class="action-btn add-btn" onclick="startAdd('{{ p.name }}')">Add</button>
                 {% endif %}
+              {% elif p.owner_manager_id and p.owner_manager_id != as_manager_id and as_manager_id %}
+                <button type="button" class="action-btn" onclick="openTradeModal({{ p.owner_manager_id }}, '{{ p.name }}')">Propose Trade</button>
               {% endif %}
             </td>
           </tr>
@@ -253,6 +256,59 @@
     {% endfor %}
   </div>
 
+  <div id="tab-trades" style="display:none">
+    {% if not my_trades %}
+    <div class="table-wrap" style="padding:28px;text-align:center;color:var(--text-secondary)">
+      No trades yet. Propose one from a player owned by another team below, or from their Team page.
+    </div>
+    {% else %}
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>With</th>
+            <th>You give</th>
+            <th>You receive</th>
+            <th>Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in my_trades %}
+          {% set i_am_proposer = t.proposer_manager_id == as_manager_id %}
+          <tr>
+            <td>{{ t.created_at[:16].replace('T', ' ') }}</td>
+            <td>{{ t.target_name if i_am_proposer else t.proposer_name }}</td>
+            <td>
+              {% for it in (t.give_items if i_am_proposer else t.receive_items) %}
+                <span style="color:#c62828">− {{ it.player_name }}</span><br>
+              {% endfor %}
+            </td>
+            <td>
+              {% for it in (t.receive_items if i_am_proposer else t.give_items) %}
+                <span style="color:#2e7d32">+ {{ it.player_name }}</span><br>
+              {% endfor %}
+            </td>
+            <td style="text-transform:capitalize">{{ t.status }}</td>
+            <td>
+              {% if t.status == 'pending' %}
+                {% if i_am_proposer %}
+                <button type="button" class="action-btn" onclick="respondTrade({{ t.id }}, 'cancel')">Cancel</button>
+                {% else %}
+                <button type="button" class="action-btn add-btn" onclick="respondTrade({{ t.id }}, 'accept')">Accept</button>
+                <button type="button" class="action-btn" onclick="respondTrade({{ t.id }}, 'decline')">Decline</button>
+                {% endif %}
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+
   <div id="tab-transactions" style="display:none">
     {% if not transactions %}
     <div class="table-wrap" style="padding:28px;text-align:center;color:var(--text-secondary)">
@@ -295,8 +351,30 @@
   </div>
 </div>
 
+<div id="trade-modal" class="modal-overlay" style="display:none">
+  <div class="modal-box modal-box-wide">
+    <h3>Propose Trade</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+      <div>
+        <div class="gw-jump-label" id="trade-give-title">Your players to give</div>
+        <div id="trade-give-list"></div>
+      </div>
+      <div>
+        <div class="gw-jump-label" id="trade-receive-title">Their players to receive</div>
+        <div id="trade-receive-list"></div>
+      </div>
+    </div>
+    <div id="trade-propose-error" style="color:var(--pl-magenta);font-size:13px;margin-top:8px;display:none"></div>
+    <div style="margin-top:14px;display:flex;gap:8px">
+      <button type="button" class="primary-btn" onclick="proposeTrade()">Propose Trade</button>
+      <button type="button" class="action-btn" onclick="closeTradeModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <script src="{{ url_for('static', filename='js/game_log.js') }}"></script>
 <script src="{{ url_for('static', filename='js/roster_picker.js') }}"></script>
+<script src="{{ url_for('static', filename='js/trades.js') }}"></script>
 <script>
 const CURRENT_GW = {{ current_gw }};
 const CURRENT_MANAGER_ID = {{ current_manager_id|tojson }};
@@ -324,7 +402,7 @@ async function toggleShortlist(playerName, btn) {
   if (document.getElementById('shortlist-only-checkbox').checked) applyFilters();
 }
 
-const TABS = ['browse', 'myclaims', 'waiverorder', 'waiverresults', 'transactions'];
+const TABS = ['browse', 'myclaims', 'waiverorder', 'waiverresults', 'trades', 'transactions'];
 function showTab(name) {
   TABS.forEach(t => {
     document.getElementById(`tab-${t}`).style.display = t === name ? '' : 'none';
