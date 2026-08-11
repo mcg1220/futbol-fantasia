@@ -58,7 +58,7 @@
       </div>
       <div style="display:flex;flex-direction:column;gap:6px">
         <label class="gw-jump-label">&nbsp;</label>
-        <button type="button" class="action-btn" onclick="exportTableToCSV('browse-table', 'browse-row', 'player_stats.csv')">⬇️ Export CSV</button>
+        <button type="button" class="action-btn" onclick="exportTableToCSV('browse-table', 'browse-row', 'player_stats.csv', {attr: 'data-stats', cols: STAT_COLS.map(c => [c[0], c[1]])})">⬇️ Export CSV</button>
       </div>
     </div>
 
@@ -82,7 +82,7 @@
         </thead>
         <tbody>
           {% for p in browse_players %}
-          <tr class="browse-row" data-player="{{ p.name|lower }} {{ p.club|lower }}" data-name="{{ p.name }}" data-owner="{{ p.owner_manager_id or '' }}" data-eligibility="{{ p.eligibility|join(',') }}" data-shortlisted="{{ '1' if p.name in my_shortlist else '' }}">
+          <tr class="browse-row" data-player="{{ p.name|lower }} {{ p.club|lower }}" data-name="{{ p.name }}" data-owner="{{ p.owner_manager_id or '' }}" data-eligibility="{{ p.eligibility|join(',') }}" data-shortlisted="{{ '1' if p.name in my_shortlist else '' }}" data-stats='{{ p.stats|tojson }}'>
             <td style="text-align:left;font-weight:600" onclick="toggleHistory('{{ p.name }}')" class="player-name-cell">
               <span class="expand-caret">▸</span> {{ p.name }}
             </td>
@@ -384,6 +384,7 @@
 const CURRENT_GW = {{ current_gw }};
 const CURRENT_MANAGER_ID = {{ current_manager_id|tojson }};
 const MY_SHORTLIST = new Set({{ my_shortlist|tojson }});
+const STAT_COLS = {{ stat_cols|tojson }};
 
 // ── Shortlist ────────────────────────────────────────────────────────────────
 async function toggleShortlist(playerName, btn) {

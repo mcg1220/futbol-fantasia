@@ -118,11 +118,52 @@ def get_my_shortlist(conn):
 def inject_current_manager():
     manager_id = session.get('manager_id')
     if not manager_id:
-        return {'current_manager_name': None, 'current_manager_id': None}
+        return {'current_manager_name': None, 'current_manager_id': None,
+                'pending_trades_count': 0, 'newly_accepted_trades': []}
     conn = get_db()
     row = conn.execute("SELECT name FROM managers WHERE id=?", (manager_id,)).fetchone()
+
+    pending_trades_count = conn.execute(
+        "SELECT COUNT(*) FROM player_trades WHERE target_manager_id=? AND status='pending'", (manager_id,)
+    ).fetchone()[0]
+
+    # One-time "your trade was accepted" confirmation for the proposer — a
+    # trade can be accepted by the other manager at any time, async from the
+    # proposer's own session, so this is surfaced as a site-wide banner the
+    # next time the proposer loads any page, then marked notified so it
+    # doesn't show again.
+    newly_accepted_rows = conn.execute("""
+        SELECT t.id, tgt.name AS target_name
+        FROM player_trades t
+        JOIN managers tgt ON tgt.id = t.target_manager_id
+        WHERE t.proposer_manager_id=? AND t.status='accepted' AND t.proposer_notified=0
+    """, (manager_id,)).fetchall()
+
+    newly_accepted_trades = []
+    for t in newly_accepted_rows:
+        items = conn.execute(
+            "SELECT player_name, from_manager_id FROM player_trade_items WHERE trade_id=?", (t['id'],)
+        ).fetchall()
+        newly_accepted_trades.append({
+            'target_name': t['target_name'],
+            'give': [i['player_name'] for i in items if i['from_manager_id'] == manager_id],
+            'receive': [i['player_name'] for i in items if i['from_manager_id'] != manager_id],
+        })
+
+    if newly_accepted_rows:
+        conn.executemany(
+            "UPDATE player_trades SET proposer_notified=1 WHERE id=?",
+            [(t['id'],) for t in newly_accepted_rows]
+        )
+        conn.commit()
+
     conn.close()
-    return {'current_manager_name': row['name'] if row else None, 'current_manager_id': manager_id}
+    return {
+        'current_manager_name': row['name'] if row else None,
+        'current_manager_id': manager_id,
+        'pending_trades_count': pending_trades_count,
+        'newly_accepted_trades': newly_accepted_trades,
+    }
 
 
 def log_audit(conn, manager_id, entity_type, action, summary, detail=None):
@@ -1918,6 +1959,11 @@ def history():
     for r in elig_rows:
         eligibility_by_player.setdefault(r['name'], []).append(r['position'])
 
+    # Full 2025-26 raw-stat breakdown per player (goals, assists, tackles,
+    # etc.) — not shown as columns on this page, only carried through as
+    # hidden per-row data for the CSV export (see STAT_COLS/browse-row).
+    _, _, stat_sums_2025, _ = compute_full_player_stats(conn)
+
     # Players with no club (or at a relegated club) aren't in the current PL
     # player pool — exclude from browse, but their historical stats remain.
     browse_rows = c.execute(f"""
@@ -1950,6 +1996,7 @@ def history():
             'avg_2026_27': s26['avg'],
             'next_opponent': next_match['opponent'] if next_match else None,
             'next_kickoff': (next_match['date'], next_match['time']) if next_match and next_match['date'] else None,
+            'stats': stat_sums_2025.get(p['name'], {}),
         })
 
     manager_roster = []
@@ -2034,6 +2081,7 @@ def history():
         waiver_order=waiver_order,
         my_claims=my_claims,
         waiver_results=waiver_results,
+        stat_cols=STAT_COLS,
     )
 
 
