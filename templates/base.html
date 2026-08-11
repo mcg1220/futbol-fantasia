@@ -28,7 +28,7 @@
         <a href="/gameweek" class="nav-link {% if request.path.startswith('/gameweek') %}active{% endif %}">📅 Gameweek</a>
         <a href="/team"     class="nav-link {% if request.path.startswith('/team') %}active{% endif %}">👕 Teams</a>
         <a href="/draft"    class="nav-link {% if request.path.startswith('/draft') %}active{% endif %}">🎙️ Draft</a>
-        <a href="/history"  class="nav-link {% if request.path.startswith('/history') %}active{% endif %}">📊 Add/Drop &amp; Waivers</a>
+        <a href="/history"  class="nav-link {% if request.path.startswith('/history') %}active{% endif %}">📊 Add/Drop &amp; Waivers{% if pending_trades_count %}<span class="nav-badge">{{ pending_trades_count }}</span>{% endif %}</a>
         <a href="/memes"    class="nav-link {% if request.path.startswith('/memes') %}active{% endif %}">🎭 Locker Room</a>
         <a href="/playoffs" class="nav-link {% if request.path.startswith('/playoffs') %}active{% endif %}">🏆 Playoffs</a>
         <details class="nav-dropdown" id="otherNavDropdown">
@@ -53,6 +53,16 @@
 
   <!-- ── Scraper banner ──────────────────────────────────────────────────── -->
   <div id="scraperBanner" class="scraper-banner" style="display:none"></div>
+
+  <!-- ── One-time trade-accepted confirmation(s) ─────────────────────────── -->
+  {% for t in newly_accepted_trades %}
+  <div class="scraper-banner banner-complete">
+    🤝 Your trade with {{ t.target_name }} was accepted!
+    {% if t.give %}You gave {{ t.give|join(', ') }}{% endif %}
+    {% if t.give and t.receive %} for {% elif t.receive %}You received {% endif %}
+    {% if t.receive %}{{ t.receive|join(', ') }}{% endif %}.
+  </div>
+  {% endfor %}
 
   <main class="site-main">
     {% block content %}{% endblock %}

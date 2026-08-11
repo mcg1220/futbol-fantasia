@@ -121,6 +121,13 @@ body {
 .nav-link:hover { color: #FFFFFF; background: rgba(255,255,255,0.12); }
 .nav-link.active { color: #FFFFFF; background: #E90052; }
 
+.nav-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 16px; height: 16px; padding: 0 4px; margin-left: 5px;
+  border-radius: 999px; background: #E90052; color: #FFFFFF;
+  font-size: 10px; font-weight: 700; line-height: 1; vertical-align: middle;
+}
+
 /* ── "Other" nav dropdown ────────────────────────────────────────────────── */
 .nav-dropdown { position: relative; }
 .nav-dropdown summary.nav-link { cursor: pointer; list-style: none; }

@@ -396,6 +396,7 @@ def create_schema(conn):
         status TEXT NOT NULL DEFAULT 'pending',
         created_at TEXT NOT NULL,
         responded_at TEXT,
+        proposer_notified INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (proposer_manager_id) REFERENCES managers(id),
         FOREIGN KEY (target_manager_id) REFERENCES managers(id)
     )
