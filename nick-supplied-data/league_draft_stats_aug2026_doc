@@ -1,0 +1,24 @@
+## Includes all match data from '25 - '26 season, excluding relegated teams West Ham, Burnley, Wolves
+## Includes players transfered back into the Prem from relegated teams: 
+  'João Gomes','Callum Wilson','Jaidon Anthony','Loum Tchaouna','Mateus Fernandes','Martin Dúbravka','Florentino'
+## Includes following players from external leagues:
+  'Xaver Schlager', 'Jérémy Jacquet', 'Hayden Hackney',
+       'Matt Targett', 'António Silva', 'João Rego', 'Hidemasa Morita',
+       'Geovany Quenda', 'Jonah Kusi-Asare', 'Óscar Mingueza',
+       'Thomas Meunier', 'Bazoumana Touré', 'Abdul Fatawu',
+       'Jeremy Monga', 'Sean Steur', 'Johan Manzambi', 'Álvaro Rodríguez',
+       'Aladji Bamba', 'Valentín Barco', 'Lukás Hornícek'
+## Does Not include the following players that were transfered in from external leagues:
+              ##'Jannik Schuster',
+               ##'Michael Svoboda',
+               ##'Costinha',
+               ##'Zadok Yohanna',
+               ##'Marco Palestra',
+               ##'Harrison Bettoni',
+              ##'Daizen Maeda',
+               ##'Tarik Muharemovic',
+               ##'Victor Munoz',
+              ##'Ewen Jaouen',
+               ##'Afner Ca',
+
+
