@@ -13370,6 +13370,7 @@ Unnamed: 0,matchid,player,date,team,accessed,opponent,Loc,G,A,PKSave,Ylw,Red,GLC
 3,1915786,António Silva,12-Apr-26,Benfica,2026-06-11,Nacional,Home,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2,0,1,3,1,,0,2
 3,1915822,António Silva,25-Apr-26,Benfica,2026-06-11,Moreirense,Home,0,1,0,0,0,0,0,0,0,0,0,0,1,1,0,0,1,3,0,,0,6
 2,1915855,António Silva,11-May-26,Benfica,2026-06-11,Braga,Home,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3,5,1,0,,0,6
+3,1915599,Ousmane Diomande,08-Aug-25,Sporting CP,2026-06-11,Casa Pia AC,Away,0,0,0,0,0,0,0,0,0,0,57,0,0,0,0,0,1,3,0,,0,1
 6,1915599,Hidemasa Morita,08-Aug-25,Sporting CP,2026-06-11,Casa Pia AC,Away,0,0,0,0,0,0,0,0,0,0,84,0,0,1,0,0,0,2,1,,0,1
 14,1915599,Geovany Quenda,08-Aug-25,Sporting CP,2026-06-11,Casa Pia AC,Away,0,0,0,0,0,0,0,0,0,0,0,57,0,2,1,2,0,3,0,,0,1
 6,1915617,Hidemasa Morita,23-Aug-25,Sporting CP,2026-06-11,Nacional,Away,0,0,0,0,0,0,0,0,0,0,31,0,0,0,1,1,1,0,0,,0,1
@@ -13379,28 +13380,44 @@ Unnamed: 0,matchid,player,date,team,accessed,opponent,Loc,G,A,PKSave,Ylw,Red,GLC
 7,1915653,Geovany Quenda,27-Sep-25,Sporting CP,2026-06-11,Estoril,Away,0,0,0,0,0,0,0,0,0,0,73,0,0,1,2,2,0,2,0,,1,2
 7,1946465,Geovany Quenda,01-Oct-25,Sporting CP,2026-06-11,Napoli,Away,0,0,0,0,0,0,0,0,0,0,0,0,1,2,1,1,0,1,0,,1,0
 14,1946465,Hidemasa Morita,01-Oct-25,Sporting CP,2026-06-11,Napoli,Away,0,0,0,0,0,0,0,0,0,0,0,77,0,0,0,1,0,0,0,,0,2
+22,1946465,Ousmane Diomande,01-Oct-25,Sporting CP,2026-06-11,Napoli,Away,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,0,0
+3,1915894,Ousmane Diomande,26-Oct-25,Sporting CP,2026-06-11,Tondela,Away,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,1,6,0,,0,1
 15,1915894,Geovany Quenda,26-Oct-25,Sporting CP,2026-06-11,Tondela,Away,1,0,0,0,0,0,0,0,0,0,0,72,1,0,0,1,0,0,0,,0,0
+3,1946425,Ousmane Diomande,04-Nov-25,Sporting CP,2026-06-11,Juventus,Away,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,3,0,,0,1
 7,1946425,Geovany Quenda,04-Nov-25,Sporting CP,2026-06-11,Juventus,Away,0,0,0,0,0,0,0,0,0,0,66,0,0,0,0,0,1,1,0,,0,0
 13,1946425,Hidemasa Morita,04-Nov-25,Sporting CP,2026-06-11,Juventus,Away,0,0,0,0,0,0,0,0,0,0,0,81,0,0,0,0,0,2,1,,0,1
+3,1915684,Ousmane Diomande,08-Nov-25,Sporting CP,2026-06-11,Santa Clara,Away,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,2,0,8,0,,0,3
 14,1915684,Hidemasa Morita,08-Nov-25,Sporting CP,2026-06-11,Santa Clara,Away,0,0,0,0,0,0,0,0,0,0,0,56,0,0,0,1,0,1,0,,0,1
 15,1915684,Geovany Quenda,08-Nov-25,Sporting CP,2026-06-11,Santa Clara,Away,0,1,0,0,0,0,0,0,0,0,0,56,0,1,0,0,0,1,0,,1,1
+3,1915750,Ousmane Diomande,05-Dec-25,Sporting CP,2026-06-11,Benfica,Away,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,3,0,,0,3
 6,1915750,Hidemasa Morita,05-Dec-25,Sporting CP,2026-06-11,Benfica,Away,0,0,0,1,0,0,0,0,0,0,60,0,0,0,1,2,0,2,0,,0,0
 13,1915750,Geovany Quenda,05-Dec-25,Sporting CP,2026-06-11,Benfica,Away,0,0,0,0,0,0,0,0,0,0,0,60,0,0,0,1,0,1,0,,0,0
+4,1946353,Ousmane Diomande,09-Dec-25,Sporting CP,2026-06-11,Bayern Munich,Away,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3,2,4,0,,0,5
 13,1946353,Hidemasa Morita,09-Dec-25,Sporting CP,2026-06-11,Bayern Munich,Away,0,0,0,0,0,0,0,0,0,0,0,91,0,0,0,0,0,0,0,,0,0
 13,1915714,Hidemasa Morita,23-Dec-25,Sporting CP,2026-06-11,Vitoria de Guimaraes,Away,0,0,0,0,0,0,0,0,0,0,0,76,0,0,0,0,0,1,0,,0,1
 12,1915775,Hidemasa Morita,02-Jan-26,Sporting CP,2026-06-11,Gil Vicente,Away,0,0,0,0,0,0,0,0,0,0,0,77,0,0,0,0,0,0,1,,0,0
 13,1915706,Hidemasa Morita,24-Jan-26,Sporting CP,2026-06-11,Arouca,Away,0,0,0,0,0,0,0,0,0,0,0,68,0,0,0,0,0,0,0,,0,0
+19,1915706,Ousmane Diomande,24-Jan-26,Sporting CP,2026-06-11,Arouca,Away,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,0,0
+3,1946473,Ousmane Diomande,28-Jan-26,Sporting CP,2026-06-11,Athletic Club,Away,1,0,0,0,0,0,0,0,0,0,53,0,1,0,0,0,1,5,1,,0,2
 13,1946473,Hidemasa Morita,28-Jan-26,Sporting CP,2026-06-11,Athletic Club,Away,0,0,0,0,0,0,0,0,0,0,0,53,0,0,0,0,1,0,0,,0,1
+3,1915742,Ousmane Diomande,21-Feb-26,Sporting CP,2026-06-11,Moreirense,Away,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,2,1,0,0,,0,6
 6,1915742,Hidemasa Morita,21-Feb-26,Sporting CP,2026-06-11,Moreirense,Away,0,0,0,0,0,0,0,0,0,0,63,0,0,0,2,2,0,0,0,,0,1
+3,1915798,Ousmane Diomande,07-Mar-26,Sporting CP,2026-06-11,Braga,Away,0,0,0,1,0,0,0,0,0,0,0,0,1,0,0,0,2,5,1,,0,1
 6,1915798,Hidemasa Morita,07-Mar-26,Sporting CP,2026-06-11,Braga,Away,0,0,0,1,0,0,0,0,0,0,72,0,0,1,1,1,1,1,0,,0,1
+3,1972188,Ousmane Diomande,11-Mar-26,Sporting CP,2026-06-11,Bodoe/Glimt,Away,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,3,0,,0,1
 11,1972188,Hidemasa Morita,11-Mar-26,Sporting CP,2026-06-11,Bodoe/Glimt,Away,0,0,0,0,0,0,0,0,0,0,0,61,0,0,0,1,0,0,0,,0,0
 6,1915859,Hidemasa Morita,22-Mar-26,Sporting CP,2026-06-11,Alverca,Away,0,1,0,0,0,0,0,0,0,0,71,0,0,1,0,0,0,1,1,,0,1
+19,1915859,Ousmane Diomande,22-Mar-26,Sporting CP,2026-06-11,Alverca,Away,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,0,0
 12,1915884,Hidemasa Morita,11-Apr-26,Sporting CP,2026-06-11,Estrela da Amadora,Away,0,0,0,0,0,0,0,0,0,0,0,66,0,1,0,1,0,1,0,,0,0
 13,1915884,Geovany Quenda,11-Apr-26,Sporting CP,2026-06-11,Estrela da Amadora,Away,0,0,0,0,0,0,0,0,0,0,0,66,0,1,1,1,0,1,0,,1,0
+15,1915884,Ousmane Diomande,11-Apr-26,Sporting CP,2026-06-11,Estrela da Amadora,Away,0,0,0,0,0,0,0,0,0,0,0,91,0,0,0,0,0,0,0,,0,0
+3,1974918,Ousmane Diomande,15-Apr-26,Sporting CP,2026-06-11,Arsenal,Away,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,,0,0
 6,1974918,Hidemasa Morita,15-Apr-26,Sporting CP,2026-06-11,Arsenal,Away,0,0,0,0,0,0,0,0,0,0,76,0,0,0,0,2,1,0,0,,0,1
 13,1974918,Geovany Quenda,15-Apr-26,Sporting CP,2026-06-11,Arsenal,Away,0,0,0,0,0,0,0,0,0,0,0,70,0,0,0,0,0,0,0,,0,0
+3,1915818,Ousmane Diomande,26-Apr-26,Sporting CP,2026-06-11,AVS Futebol SAD,Away,0,0,0,0,0,0,1,0,0,0,0,0,1,0,0,1,0,3,0,,0,3
 6,1915818,Hidemasa Morita,26-Apr-26,Sporting CP,2026-06-11,AVS Futebol SAD,Away,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,2,1,3,0,,0,2
 7,1915818,Geovany Quenda,26-Apr-26,Sporting CP,2026-06-11,AVS Futebol SAD,Away,0,0,0,0,0,0,0,0,0,0,56,0,0,0,0,2,0,2,0,,0,2
+3,1915852,Ousmane Diomande,11-May-26,Sporting CP,2026-06-11,Rio Ave,Away,0,1,0,1,0,0,0,0,0,0,0,0,0,1,0,0,1,4,2,,0,2
 5,1915852,Hidemasa Morita,11-May-26,Sporting CP,2026-06-11,Rio Ave,Away,0,0,0,0,0,0,0,0,0,0,64,0,0,0,0,1,0,1,0,,0,2
 13,1915852,Geovany Quenda,11-May-26,Sporting CP,2026-06-11,Rio Ave,Away,1,0,0,0,0,0,0,0,0,0,0,64,2,0,0,0,0,0,0,,0,0
 6,1915614,Hidemasa Morita,17-Aug-25,Sporting CP,2026-06-11,Arouca,Home,0,0,0,0,0,0,0,0,0,0,72,0,0,1,0,2,1,1,0,,0,2
@@ -13411,30 +13428,45 @@ Unnamed: 0,matchid,player,date,team,accessed,opponent,Loc,G,A,PKSave,Ylw,Red,GLC
 13,1915651,Hidemasa Morita,22-Sep-25,Sporting CP,2026-06-11,Moreirense,Home,0,0,0,0,0,0,0,0,0,0,0,53,0,1,0,1,1,0,0,,1,1
 6,1915669,Hidemasa Morita,05-Oct-25,Sporting CP,2026-06-11,Braga,Home,0,0,0,0,0,0,0,0,0,0,63,0,0,0,0,2,1,1,0,,0,3
 7,1915669,Geovany Quenda,05-Oct-25,Sporting CP,2026-06-11,Braga,Home,0,0,0,0,0,0,0,0,0,0,89,0,1,0,2,1,2,1,0,,0,3
+19,1915669,Ousmane Diomande,05-Oct-25,Sporting CP,2026-06-11,Braga,Home,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,0,0
 7,1946459,Geovany Quenda,22-Oct-25,Sporting CP,2026-06-11,Marseille,Home,0,0,0,0,0,0,0,0,0,0,63,0,1,1,0,1,0,0,0,,1,2
+15,1946459,Ousmane Diomande,22-Oct-25,Sporting CP,2026-06-11,Marseille,Home,0,0,0,0,0,0,0,0,0,0,0,79,0,0,0,0,0,0,0,,0,1
 18,1946459,Hidemasa Morita,22-Oct-25,Sporting CP,2026-06-11,Marseille,Home,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,0,0
+3,1915899,Ousmane Diomande,31-Oct-25,Sporting CP,2026-06-11,Alverca,Home,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,1,0,2,1,,0,4
 14,1915899,Hidemasa Morita,31-Oct-25,Sporting CP,2026-06-11,Alverca,Home,0,0,0,0,0,0,0,0,0,0,0,78,0,0,0,1,0,0,0,,0,1
 15,1915899,Geovany Quenda,31-Oct-25,Sporting CP,2026-06-11,Alverca,Home,0,0,0,0,0,0,0,0,0,0,0,58,1,0,0,0,0,0,0,,0,1
+3,1946450,Ousmane Diomande,26-Nov-25,Sporting CP,2026-06-11,Club Brugge,Home,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,8,1,,0,2
 9,1946450,Geovany Quenda,26-Nov-25,Sporting CP,2026-06-11,Club Brugge,Home,1,1,0,0,0,0,0,0,0,0,75,0,1,3,0,1,0,0,0,,1,2
 13,1946450,Hidemasa Morita,26-Nov-25,Sporting CP,2026-06-11,Club Brugge,Home,0,0,0,0,0,0,0,0,0,0,0,62,0,0,0,0,0,0,0,,1,1
 6,1915713,Hidemasa Morita,30-Nov-25,Sporting CP,2026-06-11,Estrela da Amadora,Home,0,1,0,0,0,0,0,0,0,0,0,0,0,2,0,3,1,2,0,,0,4
 9,1915713,Geovany Quenda,30-Nov-25,Sporting CP,2026-06-11,Estrela da Amadora,Home,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,4,0,0,0,,1,2
+19,1915713,Ousmane Diomande,30-Nov-25,Sporting CP,2026-06-11,Estrela da Amadora,Home,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,0,0
+3,1915787,Ousmane Diomande,13-Dec-25,Sporting CP,2026-06-11,AVS Futebol SAD,Home,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,2,,0,4
 6,1915787,Hidemasa Morita,13-Dec-25,Sporting CP,2026-06-11,AVS Futebol SAD,Home,0,0,0,0,0,0,0,0,0,0,72,0,0,1,0,2,2,0,0,,1,0
 14,1915747,Hidemasa Morita,28-Dec-25,Sporting CP,2026-06-11,Rio Ave,Home,0,0,0,0,0,0,0,0,0,0,0,64,0,0,0,0,0,0,0,,0,2
 5,1915804,Hidemasa Morita,16-Jan-26,Sporting CP,2026-06-11,Casa Pia AC,Home,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,3,0,2,1,,0,3
 6,1946409,Hidemasa Morita,20-Jan-26,Sporting CP,2026-06-11,Paris Saint-Germain,Home,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,4,0,3,2,,0,2
+3,1915720,Ousmane Diomande,01-Feb-26,Sporting CP,2026-06-11,Nacional,Home,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,,0,7
 5,1915720,Hidemasa Morita,01-Feb-26,Sporting CP,2026-06-11,Nacional,Home,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,1,2,0,,0,4
+3,1915685,Ousmane Diomande,15-Feb-26,Sporting CP,2026-06-11,Famalicao,Home,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,3,6,0,,0,5
 6,1915685,Hidemasa Morita,15-Feb-26,Sporting CP,2026-06-11,Famalicao,Home,0,0,0,0,0,0,0,0,0,0,75,0,0,0,1,1,1,1,0,,0,3
+3,1915749,Ousmane Diomande,27-Feb-26,Sporting CP,2026-06-11,Estoril,Home,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,7,0,,0,4
 6,1915749,Hidemasa Morita,27-Feb-26,Sporting CP,2026-06-11,Estoril,Home,0,0,0,0,0,0,0,0,0,0,71,0,0,1,0,5,1,0,0,,0,3
 6,1972190,Hidemasa Morita,17-Mar-26,Sporting CP,2026-06-11,Bodoe/Glimt,Home,0,0,0,0,0,0,0,0,0,0,67,0,0,1,0,0,0,2,0,,1,1
+16,1972190,Ousmane Diomande,17-Mar-26,Sporting CP,2026-06-11,Bodoe/Glimt,Home,0,0,0,0,0,0,0,0,0,0,0,109,0,0,0,0,0,2,0,,0,1
 5,1915875,Hidemasa Morita,03-Apr-26,Sporting CP,2026-06-11,Santa Clara,Home,0,1,0,0,0,0,0,0,0,0,67,0,2,3,0,2,1,1,0,,0,2
+19,1915875,Ousmane Diomande,03-Apr-26,Sporting CP,2026-06-11,Santa Clara,Home,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,0,0
+3,1974917,Ousmane Diomande,07-Apr-26,Sporting CP,2026-06-11,Arsenal,Home,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,6,1,,0,2
 5,1974917,Hidemasa Morita,07-Apr-26,Sporting CP,2026-06-11,Arsenal,Home,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,2,1,1,1,,0,3
+3,1915805,Ousmane Diomande,19-Apr-26,Sporting CP,2026-06-11,Benfica,Home,0,0,0,0,0,0,0,0,0,0,59,0,0,0,0,1,0,4,0,,0,3
 6,1915805,Hidemasa Morita,19-Apr-26,Sporting CP,2026-06-11,Benfica,Home,1,0,0,0,0,0,0,0,0,0,87,0,1,0,1,7,1,1,1,,0,1
 13,1915805,Geovany Quenda,19-Apr-26,Sporting CP,2026-06-11,Benfica,Home,0,0,0,0,0,0,0,0,0,0,0,67,0,1,0,0,0,0,0,,0,1
 5,1915844,Hidemasa Morita,29-Apr-26,Sporting CP,2026-06-11,Tondela,Home,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2,3,0,1,,0,1
 9,1915844,Geovany Quenda,29-Apr-26,Sporting CP,2026-06-11,Tondela,Home,0,0,0,0,0,0,0,0,0,0,56,0,0,1,3,0,1,0,0,,0,0
+19,1915844,Ousmane Diomande,29-Apr-26,Sporting CP,2026-06-11,Tondela,Home,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,0,0
 5,1915834,Hidemasa Morita,04-May-26,Sporting CP,2026-06-11,Vitoria de Guimaraes,Home,0,1,0,0,0,0,0,0,0,0,45,0,0,2,1,0,0,1,1,,0,2
 14,1915834,Geovany Quenda,04-May-26,Sporting CP,2026-06-11,Vitoria de Guimaraes,Home,0,0,0,0,0,0,0,0,0,0,0,77,0,0,0,0,0,1,0,,0,0
+15,1915834,Ousmane Diomande,04-May-26,Sporting CP,2026-06-11,Vitoria de Guimaraes,Home,0,0,0,0,0,0,0,0,0,0,0,81,0,0,0,0,0,0,0,,0,0
 6,1915860,Hidemasa Morita,16-May-26,Sporting CP,2026-06-11,Gil Vicente,Home,0,0,0,0,0,0,0,0,0,0,72,0,0,0,1,0,0,2,0,,0,1
 14,1915860,Geovany Quenda,16-May-26,Sporting CP,2026-06-11,Gil Vicente,Home,0,1,0,0,0,0,0,0,0,0,0,73,0,1,0,0,1,0,0,,0,0
 24,1873277,Jonah Kusi-Asare,24-Jun-25,Bayern Munich,2026-06-17,Benfica,Away,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,0,0
