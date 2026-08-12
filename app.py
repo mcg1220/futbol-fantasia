@@ -248,6 +248,7 @@ def get_current_pl_clubs(conn):
         SELECT DISTINCT club FROM players
         WHERE club IS NOT NULL AND club != ''
           AND club NOT IN ({','.join('?' * len(RELEGATED_CLUBS))})
+          AND draftable = 1
         ORDER BY club
     """, RELEGATED_CLUBS).fetchall()
     return [r['club'] for r in rows]
@@ -1980,6 +1981,7 @@ def history():
         FROM players p
         WHERE p.club IS NOT NULL AND p.club != ''
           AND p.club NOT IN ({','.join('?' * len(RELEGATED_CLUBS))})
+              AND p.draftable = 1
         ORDER BY p.name
     """, RELEGATED_CLUBS).fetchall()
 
@@ -3195,6 +3197,7 @@ def draft_page():
             SELECT p.name, p.club FROM players p
             WHERE p.club IS NOT NULL AND p.club != ''
               AND p.club NOT IN ({','.join('?' * len(RELEGATED_CLUBS))})
+              AND p.draftable = 1
             ORDER BY p.name
         """, RELEGATED_CLUBS).fetchall()
 
@@ -3903,6 +3906,7 @@ def transfer_current_pool_query(conn, draft_type, round_num):
             SELECT p.name, p.club, p.position, NULL AS previous_club FROM players p
             WHERE p.club IS NOT NULL AND p.club != ''
               AND p.club NOT IN ({','.join('?' * len(RELEGATED_CLUBS))})
+              AND p.draftable = 1
             ORDER BY p.name
         """, RELEGATED_CLUBS).fetchall()
 
