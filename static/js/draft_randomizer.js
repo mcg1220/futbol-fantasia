@@ -1,8 +1,12 @@
-// World Cup draft randomizer POC — avatar picker + canvas scramble animation.
-// Local-only, not wired into any real draft state.
+// World Cup draft randomizer — avatar picker + canvas scramble animation.
+// Used both as a no-consequence sandbox (/draft-randomizer-poc, no
+// WC_REAL_MODE global) and as the real Main Draft randomizer (/draft, where
+// WC_REAL_MODE = true and a successful run POSTs the result's token to
+// /api/world-cup-sim/lock-in to actually persist draft_order).
 
 let wcPicks = {}; // manager_id -> emoji
 let wcResult = null; // full server payload for the current run
+let wcLockInToken = null; // token from the server for this run, consumed on lock-in
 let wcEmojiByManager = {};
 let wcTallyByManager = {}; // manager_id -> main-game final_tally (goals) only
 let wcDisplayTally = {}; // manager_id -> main-game goals + any tiebreaker goals, for the standings/reveal display
@@ -88,6 +92,7 @@ async function startWorldCupSim() {
     }
 
     wcResult = data;
+    wcLockInToken = data.token || null;
     wcEmojiByManager = {};
     wcTallyByManager = {};
     wcDisplayTally = {};
@@ -724,6 +729,25 @@ function lockInDraftOrder() {
   document.getElementById('wc-standings-title').textContent = '✅ Draft Order Locked In';
   document.getElementById('wc-run-again-btn').style.display = 'inline-block';
   celebrateWinner();
+
+  if (typeof WC_REAL_MODE !== 'undefined' && WC_REAL_MODE && wcLockInToken) {
+    persistDraftOrder(wcLockInToken);
+  }
+}
+
+async function persistDraftOrder(token) {
+  try {
+    const resp = await fetch('/api/world-cup-sim/lock-in', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'Could not lock in the draft order.');
+    setTimeout(() => location.reload(), 2500);
+  } catch (err) {
+    alert(err.message);
+  }
 }
 
 function celebrateWinner() {

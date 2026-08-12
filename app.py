@@ -89,10 +89,11 @@ def get_db():
 
 LOGIN_EXEMPT_PATHS_EXACT = {
     '/login', '/internal/auto-scrape-trigger',
-    # Local-only "World Cup" draft-randomizer POC — no session/manager
-    # identity involved at all (see /draft-randomizer-poc), so the one
-    # write it makes is exempted rather than requiring a login. Never
-    # deployed to prod — see the working-instructions spec doc.
+    # World Cup draft-randomizer generator — pure RNG, no DB writes, no
+    # manager identity needed to watch it run (see /draft-randomizer-poc
+    # and the real /draft page). The endpoint that actually persists a
+    # result, /api/world-cup-sim/lock-in, is deliberately NOT exempt here —
+    # locking in the real draft order still requires login.
     '/api/world-cup-sim/generate',
 }
 
@@ -3182,6 +3183,8 @@ def draft_page():
     order_map = get_draft_order_map(conn)
     managers_by_id = {m['id']: dict(m) for m in managers}
     order = [{'pick_slot': slot, **managers_by_id[order_map[slot]]} for slot in sorted(order_map)] if order_map else []
+    manager_names = {m['id']: m['name'] for m in managers}
+    manager_teams = {m['id']: m['team_name'] for m in managers}
 
     browse_players = []
     if state['status'] in ('ready', 'in_progress', 'complete'):
@@ -3235,6 +3238,9 @@ def draft_page():
         current_pl_clubs=current_pl_clubs,
         my_shortlist=my_shortlist,
         pick_ownership=pick_ownership,
+        manager_names=manager_names,
+        manager_teams=manager_teams,
+        world_cup_emoji_pool=WORLD_CUP_EMOJI_POOL,
     )
 
 
@@ -4538,12 +4544,18 @@ def auto_scrape_trigger():
         return jsonify({"error": str(e)}), 500
 
 
-# ── World Cup draft-randomizer POC (local-only, never deployed) ────────────
-# See working instructions/draft_randomizer_world_cup_requirements.md. Fully
-# stateless — no DB writes, not wired into the real draft/draft_state at all.
+# ── World Cup draft-randomizer ──────────────────────────────────────────────
+# See working instructions/draft_randomizer_world_cup_requirements.md. The
+# generator itself is stateless (no DB writes) — the client animates a result
+# it fetched, then optionally "locks it in" via a short-lived server-side
+# token so the persisted draft_order always matches exactly what was watched,
+# without trusting a client-submitted order.
 
 WORLD_CUP_EMOJI_POOL = ["⚽", "🦁", "🐺", "🦅", "🐍", "🦊", "🐢", "🐙",
                          "🦈", "🐯", "🐸", "🦉", "🐝", "🦍", "🐳", "🥷"]
+
+WORLD_CUP_PENDING_RESULTS = {}  # token -> {"draft_order": [...], "created_at": float}
+WORLD_CUP_TOKEN_TTL_SECONDS = 2 * 60 * 60
 
 
 @app.route('/draft-randomizer-poc')
@@ -4584,7 +4596,46 @@ def world_cup_sim_generate():
 
     avatars_by_id = {int(mid): emoji for mid, emoji in avatars.items()}
     result = world_cup_sim.generate_result(manager_ids=manager_ids, avatars=avatars_by_id)
+
+    cutoff = time.time() - WORLD_CUP_TOKEN_TTL_SECONDS
+    for stale_token in [t for t, v in WORLD_CUP_PENDING_RESULTS.items() if v['created_at'] < cutoff]:
+        del WORLD_CUP_PENDING_RESULTS[stale_token]
+
+    token = uuid.uuid4().hex
+    WORLD_CUP_PENDING_RESULTS[token] = {"draft_order": result["draft_order"], "created_at": time.time()}
+    result["token"] = token
     return jsonify(result)
+
+
+@app.route('/api/world-cup-sim/lock-in', methods=['POST'])
+def world_cup_sim_lock_in():
+    data = request.get_json(silent=True) or {}
+    token = data.get('token')
+    pending = WORLD_CUP_PENDING_RESULTS.pop(token, None) if token else None
+    if not pending:
+        return jsonify({"error": "This result has expired or was already used — run the simulation again."}), 410
+
+    conn = get_db()
+    state = get_draft_state(conn)
+    if state['status'] not in ('not_started', 'randomizing'):
+        conn.close()
+        return jsonify({"error": "Draft order is already locked in."}), 409
+
+    conn.execute("DELETE FROM draft_order WHERE season=?", (DRAFT_SEASON,))
+    for i, manager_id in enumerate(pending["draft_order"], start=1):
+        conn.execute(
+            "INSERT INTO draft_order (season, pick_slot, manager_id) VALUES (?, ?, ?)",
+            (DRAFT_SEASON, i, manager_id)
+        )
+    conn.execute(
+        "UPDATE draft_state SET status='ready', spin_count=3 WHERE season=?",
+        (DRAFT_SEASON,)
+    )
+    log_audit(conn, session.get('manager_id'), 'draft', 'lock_in',
+              "Locked in draft order via World Cup randomizer")
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok"})
 
 
 @app.route('/healthz')
