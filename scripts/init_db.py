@@ -109,6 +109,7 @@ def create_schema(conn):
         acc_crosses INTEGER DEFAULT 0,
         acc_long_balls INTEGER DEFAULT 0,
         minutes_played INTEGER,
+        external INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (match_id) REFERENCES fixtures(match_id)
     )
     """)

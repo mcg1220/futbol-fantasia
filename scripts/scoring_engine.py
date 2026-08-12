@@ -69,7 +69,7 @@ def calc_player_score(conn, player_name, match_id, position, season="2025-26"):
                sub_off_min, sub_on_min, shots_on_target, key_passes,
                dribbles, tackles, interceptions, clearances,
                blocked_shots, saves, acc_crosses, acc_long_balls,
-               minutes_played, club
+               minutes_played, club, external
         FROM raw_stats
         WHERE player_name = ? AND match_id = ?
     """, (player_name, match_id)).fetchone()
@@ -82,7 +82,7 @@ def calc_player_score(conn, player_name, match_id, position, season="2025-26"):
      sub_off_min, sub_on_min, shots_on_target, key_passes,
      dribbles, tackles, interceptions, clearances,
      blocked_shots, saves, acc_crosses, acc_long_balls,
-     minutes_played, club) = row
+     minutes_played, club, external) = row
 
     pos = position.upper()
     breakdown = {}
@@ -128,29 +128,35 @@ def calc_player_score(conn, player_name, match_id, position, season="2025-26"):
         breakdown["minutes"] = min_pts
         score += min_pts
 
-    # Goals conceded - DEF
-    if pos == "DEF":
-        gc = get_team_goals_conceded(conn, match_id, club)
-        gc_pts = gc * config["goals_conceded"][0]
-        if gc_pts != 0:
-            breakdown["goals_conceded"] = gc_pts
-            score += gc_pts
+    # Goals conceded / clean sheet all require full-match data (both teams'
+    # rows) to compute correctly -- backfilled external-league rows only ever
+    # have the transferred-in player's own team, so opponent goals always
+    # read as 0. Skip these three components entirely for external rows
+    # rather than credit a fabricated clean sheet.
+    if not external:
+        # Goals conceded - DEF
+        if pos == "DEF":
+            gc = get_team_goals_conceded(conn, match_id, club)
+            gc_pts = gc * config["goals_conceded"][0]
+            if gc_pts != 0:
+                breakdown["goals_conceded"] = gc_pts
+                score += gc_pts
 
-    # Goals conceded - GK
-    if pos == "GK":
-        gc = get_team_goals_conceded(conn, match_id, club)
-        gc_pts = gc * config["gk_goals_conceded"][0]
-        if gc_pts != 0:
-            breakdown["gk_goals_conceded"] = gc_pts
-            score += gc_pts
+        # Goals conceded - GK
+        if pos == "GK":
+            gc = get_team_goals_conceded(conn, match_id, club)
+            gc_pts = gc * config["gk_goals_conceded"][0]
+            if gc_pts != 0:
+                breakdown["gk_goals_conceded"] = gc_pts
+                score += gc_pts
 
-    # Clean sheet - DEF or GK, 60+ minutes only
-    if pos in ("DEF", "GK") and minutes_played is not None and minutes_played >= 60:
-        gc = get_team_goals_conceded(conn, match_id, club)
-        if gc == 0:
-            cs_pts = config["clean_sheet"][0]
-            breakdown["clean_sheet"] = cs_pts
-            score += cs_pts
+        # Clean sheet - DEF or GK, 60+ minutes only
+        if pos in ("DEF", "GK") and minutes_played is not None and minutes_played >= 60:
+            gc = get_team_goals_conceded(conn, match_id, club)
+            if gc == 0:
+                cs_pts = config["clean_sheet"][0]
+                breakdown["clean_sheet"] = cs_pts
+                score += cs_pts
 
     return round(score, 2), breakdown
 
@@ -184,7 +190,7 @@ def calc_bulk_season_totals(conn, season, match_id_filter=None):
                yellow_cards, red_cards, glc, lmt, elg, own_goals, motm,
                shots_on_target, key_passes, dribbles, tackles, interceptions,
                clearances, blocked_shots, saves, acc_crosses, acc_long_balls,
-               minutes_played
+               minutes_played, external
         FROM raw_stats{where}
     """, params).fetchall()
 
@@ -236,13 +242,16 @@ def calc_bulk_season_totals(conn, season, match_id_filter=None):
 
         score += calc_minutes_points(r['minutes_played'])
 
-        gc = conceded.get((r['match_id'], r['club']), 0)
-        if pos == "DEF":
-            score += gc * config["goals_conceded"][0]
-        if pos == "GK":
-            score += gc * config["gk_goals_conceded"][0]
-        if pos in ("DEF", "GK") and (r['minutes_played'] or 0) >= 60 and gc == 0:
-            score += config["clean_sheet"][0]
+        # See calc_player_score's matching comment: external rows only have
+        # one team's data, so goals-conceded/clean-sheet can't be trusted.
+        if not r['external']:
+            gc = conceded.get((r['match_id'], r['club']), 0)
+            if pos == "DEF":
+                score += gc * config["goals_conceded"][0]
+            if pos == "GK":
+                score += gc * config["gk_goals_conceded"][0]
+            if pos in ("DEF", "GK") and (r['minutes_played'] or 0) >= 60 and gc == 0:
+                score += config["clean_sheet"][0]
 
         totals[name] = totals.get(name, 0.0) + score
         games[name] = games.get(name, 0) + 1

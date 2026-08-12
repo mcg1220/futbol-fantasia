@@ -153,6 +153,14 @@ def parse_incidents(row_html, player):
 
     has_second_yellow = "secondyellow" in row_html
     seen_sat = player.setdefault("_seen_satisfiers", set())
+    # Counts (satisfier, minute) occurrences within THIS parse call only, so
+    # two genuinely distinct events of the same type in the same minute (e.g.
+    # two separate last-man-tackle incidents) each get their own dedup key
+    # instead of collapsing into one. Deterministic re-parses of the same
+    # row_html (this function runs once per tab scraped) walk the spans in
+    # the same order, so the occurrence index -- and therefore the key -- is
+    # identical across calls, keeping cross-tab dedup intact.
+    local_occurrence = {}
 
     for incident_match in re.finditer(r'<span class="incident-icon"([^>]+)>', row_html):
         attrs = incident_match.group(1)
@@ -165,7 +173,9 @@ def parse_incidents(row_html, player):
             if satisfier in ("yellowcard", "secondyellow", "redcard"):
                 key = satisfier
             else:
-                key = (satisfier, minute)
+                occurrence = local_occurrence.get((satisfier, minute), 0)
+                local_occurrence[(satisfier, minute)] = occurrence + 1
+                key = (satisfier, minute, occurrence)
             if key in seen_sat:
                 continue
             seen_sat.add(key)
