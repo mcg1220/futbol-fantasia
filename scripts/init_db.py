@@ -438,7 +438,7 @@ def seed_scoring_config(conn):
         ("assists",           5.0,   "GK,DEF,MID,FW"),
         ("shots_on_target",   0.5,   "GK,DEF,MID,FW"),
         ("key_passes",        0.5,   "GK,DEF,MID,FW"),
-        ("dribbles",          0.5,   "GK,DEF,MID,FW"),
+        ("dribbles",          0.75,  "GK,DEF,MID,FW"),
         ("tackles",           0.75,  "GK,DEF,MID,FW"),
         ("interceptions",     0.75,  "GK,DEF,MID,FW"),
         ("clearances",        0.25,  "GK,DEF,MID,FW"),
