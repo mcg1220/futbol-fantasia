@@ -50,6 +50,7 @@ ALLOWED_MEME_EXTS   = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 sys.path.insert(0, SCRIPTS_DIR)
 from scoring_engine import calc_player_score, get_scoring_config, calc_bulk_season_totals, get_team_goals_conceded, calc_team_score_for_gw
+import world_cup_sim
 
 SEASON_CUTOFF = 1983000  # raw_stats has no season column; WhoScored match_ids below this are 2025-26
 
@@ -86,7 +87,14 @@ def get_db():
 # only writes need a real, non-spoofable identity. See /login below for how
 # session['manager_id'] gets set.
 
-LOGIN_EXEMPT_PATHS_EXACT = {'/login', '/internal/auto-scrape-trigger'}
+LOGIN_EXEMPT_PATHS_EXACT = {
+    '/login', '/internal/auto-scrape-trigger',
+    # Local-only "World Cup" draft-randomizer POC — no session/manager
+    # identity involved at all (see /draft-randomizer-poc), so the one
+    # write it makes is exempted rather than requiring a login. Never
+    # deployed to prod — see the working-instructions spec doc.
+    '/api/world-cup-sim/generate',
+}
 
 
 @app.before_request
@@ -4528,6 +4536,55 @@ def auto_scrape_trigger():
         return jsonify({"status": "checked"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ── World Cup draft-randomizer POC (local-only, never deployed) ────────────
+# See working instructions/draft_randomizer_world_cup_requirements.md. Fully
+# stateless — no DB writes, not wired into the real draft/draft_state at all.
+
+WORLD_CUP_EMOJI_POOL = ["⚽", "🦁", "🐺", "🦅", "🐍", "🦊", "🐢", "🐙",
+                         "🦈", "🐯", "🐸", "🦉", "🐝", "🦍", "🐳", "🥷"]
+
+
+@app.route('/draft-randomizer-poc')
+def draft_randomizer_poc():
+    conn = get_db()
+    managers = conn.execute("SELECT id, name, team_name FROM managers ORDER BY name").fetchall()
+    conn.close()
+    if len(managers) != world_cup_sim.NUM_PLAYERS:
+        return f"World Cup POC requires exactly {world_cup_sim.NUM_PLAYERS} managers.", 400
+    manager_names = {m['id']: m['name'] for m in managers}
+    manager_teams = {m['id']: m['team_name'] for m in managers}
+    return render_template('draft_randomizer.html', managers=managers,
+                            manager_names=manager_names, manager_teams=manager_teams,
+                            emoji_pool=WORLD_CUP_EMOJI_POOL)
+
+
+@app.route('/api/world-cup-sim/generate', methods=['POST'])
+def world_cup_sim_generate():
+    data = request.get_json(silent=True) or {}
+    avatars = data.get('avatars') or {}
+
+    if len(avatars) != world_cup_sim.NUM_PLAYERS:
+        return jsonify({"error": f"Expected exactly {world_cup_sim.NUM_PLAYERS} avatar picks."}), 400
+    if len(set(avatars.values())) != len(avatars):
+        return jsonify({"error": "Avatar choices must be unique."}), 400
+    if not all(v in WORLD_CUP_EMOJI_POOL for v in avatars.values()):
+        return jsonify({"error": "Unknown avatar emoji."}), 400
+
+    conn = get_db()
+    valid_ids = {row['id'] for row in conn.execute("SELECT id FROM managers").fetchall()}
+    conn.close()
+    try:
+        manager_ids = [int(mid) for mid in avatars.keys()]
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid manager id."}), 400
+    if not set(manager_ids).issubset(valid_ids):
+        return jsonify({"error": "Unknown manager id."}), 400
+
+    avatars_by_id = {int(mid): emoji for mid, emoji in avatars.items()}
+    result = world_cup_sim.generate_result(manager_ids=manager_ids, avatars=avatars_by_id)
+    return jsonify(result)
 
 
 @app.route('/healthz')
