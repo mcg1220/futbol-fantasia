@@ -928,6 +928,34 @@ tr:nth-child(3) .rank-num, tr:nth-child(4) .rank-num { color: var(--pl-magenta);
   margin-left: 8px;
 }
 
+/* ── Head-to-Head ────────────────────────────────────────────────────────── */
+.h2h-block {
+  border: 1px solid var(--border-color, #e2e2e2);
+  border-radius: 8px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.h2h-summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+.h2h-summary::-webkit-details-marker { display: none; }
+.h2h-summary .standings-team-cell { flex: 1; }
+.h2h-record { font-weight: 700; font-size: 15px; }
+.h2h-remaining { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+
+/* ── Top Scorer ──────────────────────────────────────────────────────────── */
+.ts-asterisk { color: var(--pl-magenta, #e91e8c); font-weight: 700; margin-left: 2px; }
+.ts-table th.col-team, .ts-table td.col-team { width: 260px; }
+.ts-table th.col-stat, .ts-table td.col-stat { width: 110px; text-align: right; }
+
+.history-table th.col-slot, .history-table td.col-slot { width: 110px; }
+.history-table th.col-stat, .history-table td.col-stat { width: 110px; }
+
 /* ── History page ────────────────────────────────────────────────────────── */
 .gw-link { color: var(--pl-magenta); text-decoration: none; font-weight: 600; }
 .gw-link:hover { text-decoration: underline; }

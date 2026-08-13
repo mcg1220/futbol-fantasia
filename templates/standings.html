@@ -54,6 +54,63 @@
   </div>
 </section>
 
+<!-- ── Top Scorer ───────────────────────────────────────────────────────── -->
+{% if ts_gw %}
+<section class="section">
+  <h2 class="section-title">🌟 Top Scorer — GW{{ ts_gw }}
+    <span class="pts-note">Best-scoring player on each team that gameweek — <span class="ts-asterisk">*</span> means they played from the bench</span>
+  </h2>
+
+  <div class="team-switcher" style="margin-bottom:14px">
+    <label class="gw-jump-label">Gameweek:</label>
+    <select class="gw-jump-select" onchange="location.href='/?ts_gw='+this.value">
+      {% for g in completed_gws %}
+      <option value="{{ g }}" {% if g == ts_gw %}selected{% endif %}>GW{{ g }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="table-wrap">
+    <table class="data-table standings-table ts-table">
+      <thead>
+        <tr>
+          <th class="col-team">Team</th>
+          <th style="text-align:left">Top Scorer</th>
+          <th class="col-stat">Points</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for mgr in managers %}
+        {% set ts = top_scorers.get(mgr.id) %}
+        <tr>
+          <td class="col-team">
+            <div class="standings-team-cell">
+              {% if mgr.photo_path %}
+              <img src="{{ url_for('static', filename=mgr.photo_path) }}" class="team-avatar team-avatar-sm" />
+              {% else %}
+              <div class="team-avatar team-avatar-sm team-avatar-placeholder">{{ mgr.name[0]|upper }}</div>
+              {% endif %}
+              <div>
+                <span class="manager-name">{{ mgr.name }}</span>
+                <span class="team-name">{{ mgr.team_name }}</span>
+              </div>
+            </div>
+          </td>
+          {% if ts %}
+          <td style="text-align:left">{{ ts.player_name }}{% if ts.is_bench %}<span class="ts-asterisk">*</span>{% endif %}</td>
+          <td class="col-stat cell-pts">{{ "%.2f"|format(ts.gw_score) }}</td>
+          {% else %}
+          <td style="text-align:left" class="cell-empty">–</td>
+          <td class="col-stat cell-empty">–</td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
 <!-- ── Season at a Glance ───────────────────────────────────────────────── -->
 <section class="section">
   <h2 class="section-title">📅 Season at a Glance</h2>

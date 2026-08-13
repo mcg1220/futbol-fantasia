@@ -388,6 +388,43 @@
 {% endif %}
 {% endmacro %}
 
+{% macro history_roster_table(players, top_scorer) %}
+{% if players %}
+<div class="table-wrap">
+  <table class="data-table roster-table history-table">
+    <thead>
+      <tr>
+        <th style="text-align:left">Player</th>
+        <th style="text-align:left">Club</th>
+        <th style="text-align:left" class="col-slot">Slot</th>
+        <th class="col-stat">GW Points</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for player in players %}
+      <tr>
+        <td style="text-align:left;font-weight:600">
+          {{ player.player_name }}
+          {% if top_scorer and player.player_name == top_scorer.player_name %}<span title="Top scorer this gameweek">⭐</span>{% endif %}
+        </td>
+        <td style="text-align:left">
+          {% if player.club and badges.get(player.club) %}<img src="{{ badges[player.club] }}" class="club-badge" />{% endif %}
+          {{ player.club or '—' }}
+        </td>
+        <td style="text-align:left" class="col-slot">
+          <span class="pos-badge">{{ player.real_position if player.slot_type == 'starter' else player.slot_type|upper }}</span>
+        </td>
+        <td class="pts-cell col-stat">{{ "%.2f"|format(player.gw_score) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state">No players.</div>
+{% endif %}
+{% endmacro %}
+
 <!-- ── Starting XI ───────────────────────────────────────────────────────── -->
 <section class="section">
   <h3 class="section-title">⚽ Starting XI — GW{{ current_gw }}
@@ -463,6 +500,111 @@
   <h4 style="margin:16px 0 6px">Injury Reserve</h4>
   {{ plan_roster_table(plan_ir, plan_gw, 'plan-table-ir') }}
   {% endif %}
+</section>
+{% endif %}
+
+<!-- ── Historical Lineup ────────────────────────────────────────────────── -->
+{% if past_gws %}
+<section class="section">
+  <h3 class="section-title">🕓 Historical Lineup
+    <span class="pts-note">See who was on this roster in a past gameweek, and who scored the most</span>
+  </h3>
+
+  <div class="team-switcher" style="margin-bottom:14px">
+    <label class="gw-jump-label">Gameweek:</label>
+    <select class="gw-jump-select" onchange="location.href='/team/{{ manager.id }}?history_gw='+this.value">
+      <option value="" {% if not history_gw %}selected{% endif %}>— Select a past gameweek —</option>
+      {% for g in past_gws %}
+      <option value="{{ g }}" {% if g == history_gw %}selected{% endif %}>GW{{ g }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  {% if history_gw %}
+    {% if history_matchup %}
+    <div class="team-matchup-badge {% if history_matchup.my_win %}matchup-win{% elif history_matchup.my_loss %}matchup-loss{% elif history_matchup.my_tie %}matchup-tie{% endif %}" style="margin-bottom:14px">
+      <div class="matchup-badge-label">GW{{ history_gw }} Matchup</div>
+      <div class="matchup-badge-scores">
+        <span class="matchup-badge-my">{{ "%.2f"|format(history_matchup.my_score) if history_matchup.my_score is not none else "—" }}</span>
+        <span class="matchup-badge-sep">vs</span>
+        <span class="matchup-badge-opp">{{ "%.2f"|format(history_matchup.opp_score) if history_matchup.opp_score is not none else "—" }}</span>
+      </div>
+      <a href="/team/{{ history_matchup.opp_id }}" class="matchup-badge-opp-name">{{ history_matchup.opp_name }} · {{ history_matchup.opp_team }}</a>
+    </div>
+    {% endif %}
+
+    <h4 style="margin:16px 0 6px">Starting XI</h4>
+    {{ history_roster_table(history_starters, history_top_scorer) }}
+
+    <h4 style="margin:16px 0 6px">Bench</h4>
+    {{ history_roster_table(history_bench, history_top_scorer) }}
+
+    {% if history_ir %}
+    <h4 style="margin:16px 0 6px">Injury Reserve</h4>
+    {{ history_roster_table(history_ir, history_top_scorer) }}
+    {% endif %}
+  {% endif %}
+</section>
+{% endif %}
+
+<!-- ── Head-to-Head ─────────────────────────────────────────────────────── -->
+{% if h2h %}
+<section class="section">
+  <h3 class="section-title">🤜🤛 Head-to-Head
+    <span class="pts-note">How this team has fared against each opponent across the 33-gameweek season</span>
+  </h3>
+
+  {% for opp_id, record in h2h.items() %}
+  {% set opp = record.opponent %}
+  <details class="h2h-block">
+    <summary class="h2h-summary">
+      <div class="standings-team-cell">
+        {% if opp.photo_path %}
+        <img src="{{ url_for('static', filename=opp.photo_path) }}" class="team-avatar team-avatar-sm" />
+        {% else %}
+        <div class="team-avatar team-avatar-sm team-avatar-placeholder">{{ opp.name[0]|upper }}</div>
+        {% endif %}
+        <div>
+          <span class="manager-name">{{ opp.name }}</span>
+          <span class="team-name">{{ opp.team_name }}</span>
+        </div>
+      </div>
+      <span class="h2h-record">{{ record.wins }}-{{ record.losses }}-{{ record.ties }}</span>
+      <span class="h2h-remaining">{{ record.remaining }} meeting{{ 's' if record.remaining != 1 }} left</span>
+    </summary>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>GW</th>
+            <th>Result</th>
+            <th>Score</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for meeting in record.meetings %}
+          <tr>
+            <td class="col-gw gw-label">{{ meeting.gw_number }}</td>
+            {% if meeting.result == 'win' %}
+            <td><span class="result-badge badge-win">W</span></td>
+            <td class="cell-pts">{{ "%.2f"|format(meeting.my_score) }} – {{ "%.2f"|format(meeting.opp_score) }}</td>
+            {% elif meeting.result == 'loss' %}
+            <td><span class="result-badge badge-loss">L</span></td>
+            <td class="cell-pts">{{ "%.2f"|format(meeting.my_score) }} – {{ "%.2f"|format(meeting.opp_score) }}</td>
+            {% elif meeting.result == 'tie' %}
+            <td><span class="result-badge badge-tie">T</span></td>
+            <td class="cell-pts">{{ "%.2f"|format(meeting.my_score) }} – {{ "%.2f"|format(meeting.opp_score) }}</td>
+            {% else %}
+            <td class="cell-empty">–</td>
+            <td class="cell-empty">Yet to be played</td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endfor %}
 </section>
 {% endif %}
 

@@ -1201,12 +1201,37 @@ def standings():
     """, (season,)).fetchall()
 
     managers = c.execute(
-        "SELECT id, name, team_name FROM managers ORDER BY name"
+        "SELECT id, name, team_name, photo_path FROM managers ORDER BY name"
     ).fetchall()
 
     glance = {}
     for row in glance_rows:
         glance.setdefault(row['gw_number'], {})[row['manager_id']] = row
+
+    # ── Top Scorer: best-scoring player per manager for a given gw ─────────
+    completed_gws = sorted({row['gw_number'] for row in glance_rows})
+
+    ts_gw = request.args.get('ts_gw', type=int)
+    if ts_gw not in completed_gws:
+        ts_gw = completed_gws[-1] if completed_gws else None
+
+    top_scorers = {}
+    if ts_gw:
+        rules_row = c.execute(
+            "SELECT COUNT(*) FROM scoring_config WHERE season=?", (season,)
+        ).fetchone()
+        scoring_season = season if rules_row and rules_row[0] > 0 else "2025-26"
+
+        for m in managers:
+            roster = get_roster_at_gw(conn, m['id'], ts_gw, season, scoring_season)
+            eligible = [r for r in roster if r['slot_type'] in ('starter', 'bench')]
+            if eligible:
+                best = max(eligible, key=lambda r: r['gw_score'])
+                top_scorers[m['id']] = {
+                    'player_name': best['player_name'],
+                    'gw_score': best['gw_score'],
+                    'is_bench': best['slot_type'] == 'bench',
+                }
 
     conn.close()
 
@@ -1217,6 +1242,9 @@ def standings():
         glance=glance,
         season=season,
         scraper_status=read_scraper_status(),
+        completed_gws=completed_gws,
+        ts_gw=ts_gw,
+        top_scorers=top_scorers,
     )
 
 
@@ -1352,6 +1380,53 @@ def team(manager_id):
           AND (mu.team_a_id=? OR mu.team_b_id=?)
     """, (manager_id,)*3 + (manager_id, manager_id, season, current_gw,
                              manager_id, manager_id)).fetchone()
+
+    # ── Head-to-Head: full-season schedule vs. every opponent ──────────────
+    # matchups already holds the complete pre-generated 33-GW schedule (see
+    # scripts/generate_schedule.py), so this is a pure read -- no
+    # "not generated yet" case to handle, only "not yet played" (no results
+    # row for that matchup_id).
+    h2h_rows = c.execute("""
+        SELECT
+            mu.gw_number,
+            CASE WHEN mu.team_a_id=? THEN mu.team_b_id ELSE mu.team_a_id END AS opp_id,
+            ra.fantasy_score AS my_score, rb.fantasy_score AS opp_score,
+            ra.win AS my_win, ra.loss AS my_loss, ra.tie AS my_tie
+        FROM matchups mu
+        LEFT JOIN results ra ON ra.matchup_id = mu.id AND ra.manager_id = ?
+        LEFT JOIN results rb ON rb.matchup_id = mu.id AND rb.manager_id != ?
+        WHERE mu.season = ? AND (mu.team_a_id = ? OR mu.team_b_id = ?)
+        ORDER BY mu.gw_number
+    """, (manager_id, manager_id, manager_id, season, manager_id, manager_id)).fetchall()
+
+    managers_by_id = {m['id']: m for m in all_managers}
+    h2h = {}
+    for row in h2h_rows:
+        opp_id = row['opp_id']
+        entry = h2h.setdefault(opp_id, {
+            'opponent': managers_by_id.get(opp_id),
+            'wins': 0, 'losses': 0, 'ties': 0, 'remaining': 0, 'meetings': [],
+        })
+        played = row['my_score'] is not None
+        if played:
+            if row['my_win']:
+                entry['wins'] += 1
+                result = 'win'
+            elif row['my_loss']:
+                entry['losses'] += 1
+                result = 'loss'
+            else:
+                entry['ties'] += 1
+                result = 'tie'
+        else:
+            entry['remaining'] += 1
+            result = None
+        entry['meetings'].append({
+            'gw_number': row['gw_number'],
+            'my_score': row['my_score'],
+            'opp_score': row['opp_score'],
+            'result': result,
+        })
 
     roster_rows = c.execute("""
         SELECT r.player_name, r.slot_type, r.position_slot,
@@ -1547,6 +1622,47 @@ def team(manager_id):
         plan_bench    = [r for r in plan_roster_rows if r['slot_type'] == 'bench']
         plan_ir       = [r for r in plan_roster_rows if r['slot_type'] == 'ir']
 
+    # ── Historical Lineup: read-only view of a past gw's roster ────────────
+    past_gws = [g for g in all_gws if g < current_gw]
+
+    history_gw = request.args.get('history_gw', type=int)
+    if history_gw not in past_gws:
+        history_gw = None
+
+    history_starters = history_bench = history_ir = []
+    history_matchup = None
+    history_top_scorer = None
+    if history_gw:
+        history_roster = get_roster_at_gw(conn, manager_id, history_gw, season, scoring_season)
+        history_starters = sorted([r for r in history_roster if r['slot_type'] == 'starter'],
+                                   key=lambda r: POS_ORDER.get(r['real_position'], 9))
+        history_bench = [r for r in history_roster if r['slot_type'] == 'bench']
+        history_ir    = [r for r in history_roster if r['slot_type'] == 'ir']
+
+        eligible_for_top = [r for r in history_roster if r['slot_type'] in ('starter', 'bench')]
+        if eligible_for_top:
+            history_top_scorer = max(eligible_for_top, key=lambda r: r['gw_score'])
+
+        history_matchup = c.execute("""
+            SELECT
+                CASE WHEN mu.team_a_id=? THEN mb.name      ELSE ma.name      END AS opp_name,
+                CASE WHEN mu.team_a_id=? THEN mb.team_name ELSE ma.team_name END AS opp_team,
+                CASE WHEN mu.team_a_id=? THEN mb.id        ELSE ma.id        END AS opp_id,
+                ra.fantasy_score AS my_score,
+                rb.fantasy_score AS opp_score,
+                ra.win AS my_win, ra.loss AS my_loss, ra.tie AS my_tie
+            FROM matchups mu
+            JOIN managers ma ON ma.id = mu.team_a_id
+            JOIN managers mb ON mb.id = mu.team_b_id
+            LEFT JOIN results ra
+                ON ra.matchup_id = mu.id AND ra.manager_id = ?
+            LEFT JOIN results rb
+                ON rb.matchup_id = mu.id AND rb.manager_id != ?
+            WHERE mu.season=? AND mu.gw_number=?
+              AND (mu.team_a_id=? OR mu.team_b_id=?)
+        """, (manager_id,)*3 + (manager_id, manager_id, season, history_gw,
+                                 manager_id, manager_id)).fetchone()
+
     conn.close()
 
     return render_template('team.html',
@@ -1582,7 +1698,72 @@ def team(manager_id):
         plan_club_map=plan_club_map,
         plan_locked_map=plan_locked_map,
         plan_gw_locked=plan_gw_locked,
+        h2h=h2h,
+        past_gws=past_gws,
+        history_gw=history_gw,
+        history_starters=history_starters,
+        history_bench=history_bench,
+        history_ir=history_ir,
+        history_matchup=history_matchup,
+        history_top_scorer=history_top_scorer,
     )
+
+
+def get_roster_at_gw(conn, manager_id, gw, season, scoring_season=None):
+    """
+    Full roster (all slot types) as it stood at gw, with each player's real
+    scoring position and their score for that gw. Shared by the historical
+    lineup view and the standings top-scorer section -- both need "who was
+    on this manager's roster at gw N and what did they score," they just do
+    different things with the result.
+
+    Deliberately looks up each player's real position from `players.position`
+    rather than using the roster row's `position_slot` -- for bench/ir rows
+    `position_slot` is literally the string 'bench'/'ir', not a real
+    position, so passing it straight into calc_player_score() would silently
+    zero out every position-gated stat except minutes.
+    """
+    c = conn.cursor()
+    if scoring_season is None:
+        rules_row = c.execute(
+            "SELECT COUNT(*) FROM scoring_config WHERE season=?", (season,)
+        ).fetchone()
+        scoring_season = season if rules_row and rules_row[0] > 0 else "2025-26"
+
+    roster_rows = c.execute("""
+        SELECT r.player_name, r.slot_type, r.position_slot, p.club, p.position
+        FROM rosters r
+        LEFT JOIN players p ON p.name = r.player_name
+        WHERE r.manager_id=?
+          AND r.gw_start <= ?
+          AND (r.gw_end IS NULL OR r.gw_end >= ?)
+    """, (manager_id, gw, gw)).fetchall()
+
+    results = []
+    for row in roster_rows:
+        name = row['player_name']
+        real_position = (row['position'] or 'MID').upper()
+
+        match_rows = c.execute(
+            "SELECT match_id FROM raw_stats WHERE player_name=? AND gw_number=?",
+            (name, gw)
+        ).fetchall()
+
+        gw_score = 0.0
+        for m in match_rows:
+            score, _ = calc_player_score(conn, name, m['match_id'], real_position, season=scoring_season)
+            gw_score += score
+
+        results.append({
+            'player_name': name,
+            'slot_type': row['slot_type'],
+            'position_slot': row['position_slot'],
+            'real_position': real_position,
+            'club': row['club'],
+            'gw_score': round(gw_score, 2),
+        })
+
+    return results
 
 
 def apply_slot_change(conn, manager_id, player_name, gw, new_slot_type, new_position_slot):
