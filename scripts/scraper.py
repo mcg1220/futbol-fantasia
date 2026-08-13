@@ -329,7 +329,24 @@ def accept_cookies(page):
         pass
 
 
-def scrape_saves(page, match_id, home_players, away_players):
+def known_gk_names(club):
+    """Cross-reference against our own persisted roster data for players
+    already tagged GK at this club -- catches in-page detection misses (e.g.
+    a substitute keeper brought on whose 'Sub' label never got linked back
+    to a GK id, since that link only forms if we'd already seen them start
+    as GK earlier in THIS SAME scrape run)."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute(
+            "SELECT name FROM players WHERE club = ? AND position = 'GK'", (club,)
+        ).fetchall()
+        conn.close()
+        return {r[0] for r in rows}
+    except Exception:
+        return set()
+
+
+def scrape_saves(page, match_id, home_team, away_team, home_players, away_players):
     try:
         live_url = f"https://www.whoscored.com/matches/{match_id}/live"
         if not goto_with_retry(page, live_url, timeout=30000, retries=2):
@@ -346,11 +363,18 @@ def scrape_saves(page, match_id, home_players, away_players):
             saves_el.locator('[data-field="away"]').first.get_attribute("data-value")
         )
 
-        def assign_saves(team_players, total_saves):
+        def assign_saves(team_players, total_saves, club):
             if total_saves == 0:
                 return
 
+            # Union of in-page position detection and our own persisted
+            # roster's known GKs at this club -- either signal alone can
+            # miss a keeper (e.g. a bench keeper subbed on for the first
+            # time this season), the union rarely does.
             gks = {n: p for n, p in team_players.items() if p.get("position", "") == "GK"}
+            for name in known_gk_names(club):
+                if name in team_players and name not in gks:
+                    gks[name] = team_players[name]
 
             if len(gks) == 1:
                 name = list(gks.keys())[0]
@@ -366,8 +390,8 @@ def scrape_saves(page, match_id, home_players, away_players):
             else:
                 print(f"  Warning: no GK identified — saves not assigned ({total_saves} total)")
 
-        assign_saves(home_players, home_saves)
-        assign_saves(away_players, away_saves)
+        assign_saves(home_players, home_saves, home_team)
+        assign_saves(away_players, away_saves, away_team)
 
     except Exception as e:
         print(f"  Warning: could not scrape saves: {e}")
@@ -442,7 +466,7 @@ def scrape_match(match_id, headless=True):
                     tab_failures.append(f"away/{tab}")
 
             print("  Scraping saves...")
-            scrape_saves(page, match_id, home_players, away_players)
+            scrape_saves(page, match_id, home_team, away_team, home_players, away_players)
         finally:
             # Guaranteed even if something above raises — an unclosed browser
             # is an orphaned Chromium process that keeps eating memory long
