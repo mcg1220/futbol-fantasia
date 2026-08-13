@@ -13,25 +13,33 @@
         {% else %}
         <div class="team-avatar team-avatar-lg team-avatar-placeholder" id="team-avatar-placeholder">{{ manager.name[0]|upper }}</div>
         {% endif %}
+        {% if manager.id == current_manager_id %}
         <div class="team-avatar-overlay">📷</div>
+        {% endif %}
 
         <div class="avatar-menu" id="avatar-menu" style="display:none">
           {% if manager.photo_path %}
           <button type="button" onclick="event.stopPropagation(); viewPhoto()">🔍 View Photo</button>
           {% endif %}
+          {% if manager.id == current_manager_id %}
           <button type="button" onclick="event.stopPropagation(); document.getElementById('photo-input').click()">📷 Change Photo</button>
+          {% endif %}
         </div>
       </div>
+      {% if manager.id == current_manager_id %}
       <input type="file" id="photo-input" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none" onchange="uploadPhoto(this.files[0])" />
+      {% endif %}
 
       <div class="team-header-text">
         <h2 class="team-manager-name">{{ manager.name }}</h2>
         <div class="team-name-row">
           <span class="team-team-name" id="team-name-display">{{ manager.team_name }}</span>
+          {% if manager.id == current_manager_id %}
           <button type="button" class="edit-pencil-btn" onclick="startEditTeamName()" title="Rename team">✏️</button>
           <input type="text" class="team-name-input" id="team-name-input" value="{{ manager.team_name }}" maxlength="40" style="display:none" />
           <button type="button" class="action-btn" id="save-team-name-btn" onclick="saveTeamName()" style="display:none">Save</button>
           <button type="button" class="action-btn" id="cancel-team-name-btn" onclick="cancelEditTeamName()" style="display:none">Cancel</button>
+          {% endif %}
         </div>
       </div>
     </div>
