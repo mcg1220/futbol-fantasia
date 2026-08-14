@@ -107,6 +107,16 @@ body.nav-open .nav-toggle-bar:nth-child(3) { transform: translateY(-7px) rotate(
 
 body.nav-open .site-nav { transform: translateX(0); }
 
+/* .site-header is position:sticky with z-index:100 (style.css), which makes it
+   a STACKING CONTEXT. That means the drawer's z-index:200 is scoped inside the
+   header and effectively paints at 100 -- while the scrim below, being a
+   pseudo-element of <body>, sits in the root context at 150. Without this
+   rule the scrim paints over the whole header and swallows every tap on a
+   drawer link, which reads as "the menu just closes when I pick something".
+   Raising the header above the scrim while the drawer is open fixes both the
+   dimming and the hit-testing. Still below .modal-overlay (z-index 1000). */
+body.nav-open .site-header { z-index: 300; }
+
 /* Scrim behind the drawer, drawn without extra markup. */
 body.nav-open::after {
   content: "";
