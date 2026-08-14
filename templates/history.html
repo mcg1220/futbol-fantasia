@@ -64,19 +64,26 @@
 
     <div id="add-banner" style="display:none;padding:10px 14px;margin-bottom:12px;border-radius:8px;background:var(--pl-magenta-bg);color:var(--pl-magenta);font-size:13px;font-weight:600"></div>
 
+    <!-- Mobile only: secondary columns are hidden behind this toggle. Inline
+         display:none keeps it off desktop; mobile.css overrides. -->
+    <div class="cols-toggle-wrap mobile-only-flex" style="display:none">
+      <button type="button" class="action-btn" data-cols-toggle="browse-table"
+              onclick="toggleAllCols('browse-table', this)">↦ Show all stats</button>
+    </div>
+
     <div class="table-wrap">
       <table class="data-table" id="browse-table">
         <thead>
           <tr>
             <th class="sortable" style="text-align:left" onclick="sortBrowse(0)">Player</th>
-            <th class="sortable" style="text-align:left" onclick="sortBrowse(1)">Club</th>
-            <th style="text-align:left">Next Match</th>
-            <th style="text-align:left">Eligible</th>
+            <th class="sortable col-extra" style="text-align:left" onclick="sortBrowse(1)">Club</th>
+            <th class="col-extra" style="text-align:left">Next Match</th>
+            <th class="col-extra" style="text-align:left">Eligible</th>
             <th style="text-align:left">Owner</th>
             <th class="sortable col-2025" data-type="num" onclick="sortBrowse(5)">2025–26 FPts</th>
             <th class="sortable col-2025" data-type="num" onclick="sortBrowse(6)">2025–26 Avg</th>
             <th class="sortable" data-type="num" onclick="sortBrowse(7)">2026–27 FPts</th>
-            <th class="sortable" data-type="num" onclick="sortBrowse(8)">2026–27 Avg</th>
+            <th class="sortable col-extra" data-type="num" onclick="sortBrowse(8)">2026–27 Avg</th>
             <th class="no-export">Action</th>
           </tr>
         </thead>
@@ -86,14 +93,14 @@
             <td style="text-align:left;font-weight:600" onclick="toggleHistory('{{ p.name }}')" class="player-name-cell">
               <span class="expand-caret">▸</span> {{ p.name }}
             </td>
-            <td style="text-align:left">{{ p.club }}</td>
-            <td style="text-align:left">
+            <td style="text-align:left" class="col-extra">{{ p.club }}</td>
+            <td style="text-align:left" class="col-extra">
               {% if p.next_opponent %}
                 vs {{ p.next_opponent }}
                 {% if p.next_kickoff %}<br><span class="fixture-time">{{ p.next_kickoff[0] }}, {{ p.next_kickoff[1] }}</span>{% endif %}
               {% else %}<span style="color:var(--text-muted)">—</span>{% endif %}
             </td>
-            <td style="text-align:left">
+            <td style="text-align:left" class="col-extra">
               {% for pos in p.eligibility %}<span class="pos-badge">{{ pos }}</span>{% endfor %}
             </td>
             <td style="text-align:left">
@@ -108,7 +115,7 @@
             <td class="col-2025">{{ '%.2f'|format(p.pts_2025_26) }}</td>
             <td class="col-2025">{{ '%.2f'|format(p.avg_2025_26) }}</td>
             <td>{{ '%.2f'|format(p.pts_2026_27) }}</td>
-            <td>{{ '%.2f'|format(p.avg_2026_27) }}</td>
+            <td class="col-extra">{{ '%.2f'|format(p.avg_2026_27) }}</td>
             <td class="browse-action-cell">
               <button type="button" class="shortlist-star" onclick="toggleShortlist('{{ p.name }}', this)" title="Shortlist">{{ '⭐' if p.name in my_shortlist else '☆' }}</button>
               {% if not p.owner_manager_id and as_manager_id %}

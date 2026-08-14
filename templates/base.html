@@ -146,6 +146,25 @@
       });
     }
 
+    // ── Wide-table column toggle (mobile) ─────────────────────────────────
+    // Tables tag their secondary columns with .col-extra; mobile.css hides
+    // those until the table carries .cols-all. Desktop never hides anything,
+    // so this is inert there even if the class is somehow set.
+    function toggleAllCols(tableId, btn) {
+      const t = document.getElementById(tableId);
+      if (!t) return;
+      const on = t.classList.toggle('cols-all');
+      btn.textContent = on ? '↤ Key stats only' : '↦ Show all stats';
+      try { localStorage.setItem('colsAll:' + tableId, on ? '1' : ''); } catch (e) {}
+    }
+
+    document.querySelectorAll('[data-cols-toggle]').forEach((btn) => {
+      const id = btn.getAttribute('data-cols-toggle');
+      let saved = '';
+      try { saved = localStorage.getItem('colsAll:' + id) || ''; } catch (e) {}
+      if (saved === '1') toggleAllCols(id, btn);
+    });
+
     // ── Scraper banner ─────────────────────────────────────────────────────
     const banner      = document.getElementById('scraperBanner');
     let   wasRunning  = false;

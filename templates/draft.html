@@ -260,21 +260,29 @@
       </div>
     </div>
 
+    <!-- Mobile only: the pool is 30 columns wide, so secondary stats are
+         hidden behind this toggle. Inline display:none keeps it off desktop
+         without a style.css rule; mobile.css overrides with !important. -->
+    <div class="cols-toggle-wrap mobile-only-flex" style="display:none">
+      <button type="button" class="action-btn" data-cols-toggle="pool-table"
+              onclick="toggleAllCols('pool-table', this)">↦ Show all stats</button>
+    </div>
+
     <div class="table-wrap pool-table-wrap">
       <table class="data-table pool-table-sticky" id="pool-table">
         <thead>
           <tr>
             <th class="pool-sticky-col pool-sticky-0 no-export">Draft</th>
             <th class="sortable pool-sticky-col pool-sticky-1" style="text-align:left" onclick="sortPool(1)">Player</th>
-            <th class="sortable pool-sticky-col pool-sticky-2" style="text-align:left" onclick="sortPool(2)">Club</th>
+            <th class="sortable pool-sticky-col pool-sticky-2 col-extra" style="text-align:left" onclick="sortPool(2)">Club</th>
             <th class="pool-sticky-col pool-sticky-3" style="text-align:left">Eligible</th>
-            <th style="text-align:left">Status</th>
+            <th class="col-extra" style="text-align:left">Status</th>
             <th class="sortable" data-type="num" onclick="sortPool(5)">2025–26 FPts</th>
-            <th class="sortable" data-type="num" onclick="sortPool(6)">2025–26 Avg</th>
+            <th class="sortable col-extra" data-type="num" onclick="sortPool(6)">2025–26 Avg</th>
             <th class="sortable" data-type="num" onclick="sortPool(7)" title="2026-27 projected total points">Proj FPts</th>
-            <th class="sortable" data-type="num" onclick="sortPool(8)" title="2026-27 projected average points">Proj Avg</th>
+            <th class="sortable col-extra" data-type="num" onclick="sortPool(8)" title="2026-27 projected average points">Proj Avg</th>
             {% for key, label, title in stat_cols %}
-            <th class="sortable" data-type="num" onclick="sortPool({{ loop.index + 8 }})" title="2025-26 total {{ title }}">{{ label }}</th>
+            <th class="sortable col-extra" data-type="num" onclick="sortPool({{ loop.index + 8 }})" title="2025-26 total {{ title }}">{{ label }}</th>
             {% endfor %}
           </tr>
         </thead>
@@ -294,20 +302,20 @@
             <td style="text-align:left;font-weight:600" class="player-name-cell pool-sticky-col pool-sticky-1" onclick="togglePoolHistory('{{ p.name }}')">
               <span class="expand-caret">▸</span> {{ p.name }}
             </td>
-            <td style="text-align:left" class="pool-sticky-col pool-sticky-2">{{ p.club }}</td>
+            <td style="text-align:left" class="pool-sticky-col pool-sticky-2 col-extra">{{ p.club }}</td>
             <td style="text-align:left" class="pool-sticky-col pool-sticky-3">
               {% for pos in p.eligibility %}<span class="pos-badge">{{ pos }}</span>{% endfor %}
             </td>
-            <td style="text-align:left" class="pool-status-cell">
+            <td style="text-align:left" class="pool-status-cell col-extra">
               {% if p.owner_name %}<span style="color:var(--pl-magenta)">Drafted — {{ p.owner_name }}</span>
               {% else %}<span style="color:var(--text-muted)">Available</span>{% endif %}
             </td>
             <td>{{ '%.2f'|format(p.pts_2025_26) }}</td>
-            <td>{{ '%.2f'|format(p.avg_2025_26) }}</td>
+            <td class="col-extra">{{ '%.2f'|format(p.avg_2025_26) }}</td>
             <td>{{ '%.2f'|format(p.proj_total) if p.proj_total is not none else '—' }}</td>
-            <td>{{ '%.2f'|format(p.proj_avg) if p.proj_avg is not none else '—' }}</td>
+            <td class="col-extra">{{ '%.2f'|format(p.proj_avg) if p.proj_avg is not none else '—' }}</td>
             {% for key, label, title in stat_cols %}
-            <td>{{ p.stats.get(key) or 0 }}</td>
+            <td class="col-extra">{{ p.stats.get(key) or 0 }}</td>
             {% endfor %}
           </tr>
           <tr class="pool-history-row" data-name="{{ p.name }}" style="display:none">

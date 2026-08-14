@@ -272,6 +272,150 @@ body.nav-open { overflow: hidden; }
   .team-switcher select { max-width: 100%; }
 
 
+  /* ── Mobile-only elements ─────────────────────────────────────────────── */
+
+  /* Same pattern as .nav-toggle: these carry an inline style="display:none"
+     so desktop needs no style.css rule, and only !important beats that. */
+  .mobile-only        { display: block !important; }
+  .mobile-only-flex   { display: flex !important; }
+
+
+  /* ── Key columns: hide secondary stats until asked for ────────────────── */
+
+  /* Columns tagged .col-extra are hidden until the table gains .cols-all.
+     Specificity is (0,3,1) and nothing in style.css sets `display` on a td,
+     so there is no fight and no !important. Because "show all" REMOVES the
+     :not() match rather than overriding it, no counter-rule is needed.
+
+     Note for future edits: never implement this by removing DOM nodes, and
+     never reuse .no-export as the hiding hook. export_csv.js indexes
+     row.children positionally, and CSS display:none leaves both that
+     indexing and classList untouched -- which is exactly why hiding columns
+     cannot corrupt the CSV. Removing nodes would. */
+  .data-table:not(.cols-all) th.col-extra,
+  .data-table:not(.cols-all) td.col-extra { display: none; }
+
+  /* The browse table's 2025-26 pair already has its own .col-2025 hook driven
+     by the "Hide 2025-26 stats" button. Reuse it rather than also tagging
+     those cells .col-extra: applyHide2025() writes an inline display, which
+     beats this rule when set to 'none' and yields to it when cleared, so the
+     explicit button always wins and all four on/off combinations behave. */
+  .data-table:not(.cols-all) th.col-2025,
+  .data-table:not(.cols-all) td.col-2025 { display: none; }
+
+  .cols-toggle-wrap { margin-bottom: 8px; }
+
+
+  /* ── Draft pool table ─────────────────────────────────────────────────── */
+
+  /* The four frozen columns are 70+170+140+90 = 470px, wider than the whole
+     viewport. Keep only the Draft action and the player name frozen; Club is
+     hidden as .col-extra and Eligible scrolls with the rest. */
+  .pool-table-sticky .pool-sticky-2,
+  .pool-table-sticky .pool-sticky-3 {
+    position: static;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+  }
+  .pool-table-sticky .pool-sticky-3 { border-right: none; }
+
+  .pool-table-sticky .pool-sticky-0 { width: 62px; min-width: 62px; max-width: 62px; }
+  .pool-table-sticky .pool-sticky-1 {
+    left: 62px;
+    width: 124px; min-width: 124px; max-width: 124px;
+    border-right: 2px solid var(--border);
+  }
+
+  /* .pool-table-wrap is referenced by three templates but has no rule in
+     style.css at all. Bounding its height here makes the sticky thead at
+     style.css:254 actually stick -- today it never does, because its scroll
+     container is unbounded. */
+  .pool-table-wrap { max-height: 70vh; max-height: 70dvh; }
+
+
+  /* ── Snake draft board ────────────────────────────────────────────────── */
+
+  /* 9 columns at min-width:88px = 762px once picks exist. Dropping the
+     manager names to avatar-only and freezing the round label brings it back
+     to roughly a screen and a half, with the round always visible. */
+  .snake-matrix th,
+  .snake-matrix td { min-width: 62px; padding: 3px 4px; }
+
+  .snake-col-header { gap: 0; }
+  .snake-col-header span { display: none; }   /* keep the avatar, drop the name */
+
+  .snake-round-label {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    min-width: 42px !important;   /* beats the !important at style.css:1316 */
+    background: var(--bg-thead);
+  }
+
+
+  /* ── Season at a Glance (33 rows x 8 managers) ────────────────────────── */
+
+  /* Column hiding is the wrong tool here -- the columns are people. Freeze
+     the GW label and shrink the cells instead, mirroring the sticky pattern
+     already used by .pool-sticky-col at style.css:255-257. */
+  .glance-table th.col-gw,
+  .glance-table td.col-gw {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    width: 38px; min-width: 38px;
+    background: var(--bg-card);
+  }
+  .glance-table thead th.col-gw { z-index: 3; background: var(--bg-thead); }
+  .glance-table tbody tr:nth-child(even) td.col-gw { background: var(--bg-row-alt); }
+
+  .glance-table th.col-mgr { min-width: 62px; font-size: 9px; }
+  .glance-cell { min-width: 62px; padding: 6px 4px; }
+  .glance-cell .cell-pts { display: block; font-size: 10px; }
+  .result-badge { font-size: 9px; }
+
+
+  /* ── Team roster tables ───────────────────────────────────────────────── */
+
+  /* roster_table has a two-row header using rowspan/colspan, which CSS cannot
+     restructure -- hiding columns under a colspan group is engine-dependent.
+     So freeze the player name and let the rest scroll, rather than risking a
+     broken header. */
+  .roster-table th:first-child,
+  .roster-table td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--bg-card);
+    text-align: left;
+    max-width: 128px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .roster-table thead th:first-child { z-index: 3; background: var(--bg-thead); }
+  .roster-table tbody tr:nth-child(even) td:first-child { background: var(--bg-row-alt); }
+
+  /* Accordion stat groups are min-width:180px in style.css and overflow. */
+  .stat-group { min-width: 0; flex: 1 1 100%; }
+
+
+  /* ── Locker Room ──────────────────────────────────────────────────────── */
+
+  /* The Fabric.js editor is hardcoded to a 640x480 coordinate space, and
+     scaling it with CSS desyncs pointer math from object positions, so taps
+     land in the wrong place. Gate it rather than ship a broken editor --
+     the feed, posting, reactions and comments all work fine on a phone. */
+  .canvas-desktop-only { display: none !important; }
+
+  .meme-canvas-note {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.4;
+    align-self: center;
+  }
+
+
   /* ── Modals become bottom sheets ──────────────────────────────────────── */
 
   .modal-overlay { align-items: flex-end; padding: 0; }

@@ -12,7 +12,12 @@
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button type="button" class="action-btn" onclick="openUploadComposer()">🖼️ Upload Image/GIF</button>
       <button type="button" class="action-btn" onclick="openLinkComposer()">🔗 Paste a Link</button>
-      <button type="button" class="action-btn" onclick="openMemeCanvas()">🎨 Build a Meme</button>
+      <!-- The Fabric.js editor has a fixed 640x480 coordinate space that does
+           not survive being scaled to a phone (pointer math desyncs from
+           object positions), so it is desktop-only for now. Everything else
+           on this page works fine on mobile. -->
+      <button type="button" class="action-btn canvas-desktop-only" onclick="openMemeCanvas()">🎨 Build a Meme</button>
+      <span class="meme-canvas-note mobile-only" style="display:none">🎨 The meme builder is desktop-only for now — uploading and linking work here.</span>
     </div>
   </div>
 
