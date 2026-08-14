@@ -90,7 +90,7 @@
         <tbody>
           {% for p in browse_players %}
           <tr class="browse-row" data-player="{{ p.name|lower }} {{ p.club|lower }}" data-name="{{ p.name }}" data-owner="{{ p.owner_manager_id or '' }}" data-eligibility="{{ p.eligibility|join(',') }}" data-shortlisted="{{ '1' if p.name in my_shortlist else '' }}" data-stats='{{ p.stats|tojson }}'>
-            <td style="text-align:left;font-weight:600" onclick="toggleHistory('{{ p.name }}')" class="player-name-cell">
+            <td style="text-align:left;font-weight:600" onclick="toggleHistory('{{ p.name|js_string }}')" class="player-name-cell">
               <span class="expand-caret">▸</span> {{ p.name }}
             </td>
             <td style="text-align:left" class="col-extra">{{ p.club }}</td>
@@ -117,15 +117,15 @@
             <td>{{ '%.2f'|format(p.pts_2026_27) }}</td>
             <td class="col-extra">{{ '%.2f'|format(p.avg_2026_27) }}</td>
             <td class="browse-action-cell">
-              <button type="button" class="shortlist-star" onclick="toggleShortlist('{{ p.name }}', this)" title="Shortlist">{{ '⭐' if p.name in my_shortlist else '☆' }}</button>
+              <button type="button" class="shortlist-star" onclick="toggleShortlist('{{ p.name|js_string }}', this)" title="Shortlist">{{ '⭐' if p.name in my_shortlist else '☆' }}</button>
               {% if not p.owner_manager_id and as_manager_id %}
                 {% if waiver_window %}
-                <button type="button" class="action-btn add-btn" onclick="startClaim('{{ p.name }}')">Claim</button>
+                <button type="button" class="action-btn add-btn" onclick="startClaim('{{ p.name|js_string }}')">Claim</button>
                 {% else %}
-                <button type="button" class="action-btn add-btn" onclick="startAdd('{{ p.name }}')">Add</button>
+                <button type="button" class="action-btn add-btn" onclick="startAdd('{{ p.name|js_string }}')">Add</button>
                 {% endif %}
               {% elif p.owner_manager_id and p.owner_manager_id != as_manager_id and as_manager_id %}
-                <button type="button" class="action-btn" onclick="openTradeModal({{ p.owner_manager_id }}, '{{ p.name }}')">Propose Trade</button>
+                <button type="button" class="action-btn" onclick="openTradeModal({{ p.owner_manager_id }}, '{{ p.name|js_string }}')">Propose Trade</button>
               {% endif %}
             </td>
           </tr>

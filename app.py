@@ -39,6 +39,26 @@ app.permanent_session_lifetime = timedelta(days=90)
 # file to gate Flask's debug mode.
 app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_DEBUG', 'true').lower() != 'true'
 
+
+@app.template_filter('js_string')
+def js_string_filter(value):
+    """Escape a value for interpolation inside a single-quoted JS string
+    literal embedded in an HTML attribute, e.g. onclick="fn('{{ x|js_string }}')".
+
+    Player names like "Nico O'Reilly" broke every onclick handler that
+    interpolated the raw name into a single-quoted JS string: the apostrophe
+    terminated the string early, leaving invalid JS, so the click silently did
+    nothing. Jinja's autoescaping doesn't prevent this — it HTML-escapes the
+    apostrophe to `&#39;`, but the browser decodes that back to a literal `'`
+    before handing the attribute value to the JS engine, so the string still
+    breaks. Escaping backslash and apostrophe here (before Jinja's own
+    autoescaping runs) survives that round trip: `'` becomes `\'`, Jinja turns
+    that into `\&#39;`, the browser decodes it to `\'`, and JS reads that as an
+    escaped quote rather than the end of the string.
+    """
+    return str(value).replace('\\', '\\\\').replace("'", "\\'")
+
+
 DB_PATH             = os.path.join(os.path.dirname(__file__), 'data', 'fantasia.db')
 SCRAPER_STATUS_PATH = os.path.join(os.path.dirname(__file__), 'data', 'scraper_status.json')
 SCRIPTS_DIR         = os.path.join(os.path.dirname(__file__), 'scripts')

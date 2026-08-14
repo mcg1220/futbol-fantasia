@@ -197,8 +197,8 @@
             </select>
             {% if player_locked or gw_locked %}<span class="lock-icon" title="{% if gw_locked %}GW{{ current_gw }} is locked{% else %}Locked — match already kicked off{% endif %}">🔒</span>{% endif %}
             {% if manager.id == current_manager_id %}
-            <button type="button" class="slot-action-btn" title="Swap with another player" onclick="event.stopPropagation(); startSwap('{{ player.player_name }}')">🔀</button>
-            <button type="button" class="slot-action-btn" title="Drop, no replacement" onclick="event.stopPropagation(); startDrop('{{ player.player_name }}')">🗑️</button>
+            <button type="button" class="slot-action-btn" title="Swap with another player" onclick="event.stopPropagation(); startSwap('{{ player.player_name|js_string }}')">🔀</button>
+            <button type="button" class="slot-action-btn" title="Drop, no replacement" onclick="event.stopPropagation(); startDrop('{{ player.player_name|js_string }}')">🗑️</button>
             {% endif %}
           </td>
           <td style="text-align:left">
@@ -293,7 +293,7 @@
               </div>
 
               <div class="stat-group game-log-group">
-                <div class="stat-group-label game-log-toggle" onclick="event.stopPropagation(); toggleTeamGameLog('gl-{{ uid }}', '{{ player.player_name }}')">
+                <div class="stat-group-label game-log-toggle" onclick="event.stopPropagation(); toggleTeamGameLog('gl-{{ uid }}', '{{ player.player_name|js_string }}')">
                   📋 Game Log <span class="game-log-arrow" id="gl-arrow-{{ uid }}">▾</span>
                 </div>
                 <div class="game-log-table-wrap" id="gl-{{ uid }}" data-player="{{ player.player_name }}" style="display:none"></div>
@@ -373,7 +373,7 @@
             </select>
             {% if player_locked or plan_gw_locked %}<span class="lock-icon" title="{% if plan_gw_locked %}GW{{ gw }} is locked{% else %}Locked — match already kicked off{% endif %}">🔒</span>{% endif %}
             {% if manager.id == current_manager_id %}
-            <button type="button" class="slot-action-btn" title="Swap with another player" onclick="startSwap('{{ player.player_name }}', {{ gw }})">🔀</button>
+            <button type="button" class="slot-action-btn" title="Swap with another player" onclick="startSwap('{{ player.player_name|js_string }}', {{ gw }})">🔀</button>
             {% endif %}
           </td>
           <td style="text-align:left">

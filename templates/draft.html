@@ -294,12 +294,12 @@
               data-shortlisted="{{ '1' if p.name in my_shortlist else '' }}"
               id="pool-row-{{ p.name|replace(' ', '_') }}">
             <td class="pool-action-cell pool-sticky-col pool-sticky-0">
-              <button type="button" class="shortlist-star" onclick="toggleShortlist('{{ p.name }}', this)" title="Shortlist">{{ '⭐' if p.name in my_shortlist else '☆' }}</button>
+              <button type="button" class="shortlist-star" onclick="toggleShortlist('{{ p.name|js_string }}', this)" title="Shortlist">{{ '⭐' if p.name in my_shortlist else '☆' }}</button>
               {% if not p.owner_manager_id %}
-              <button type="button" class="action-btn" onclick="startDraftPick('{{ p.name }}')">Draft</button>
+              <button type="button" class="action-btn" onclick="startDraftPick('{{ p.name|js_string }}')">Draft</button>
               {% endif %}
             </td>
-            <td style="text-align:left;font-weight:600" class="player-name-cell pool-sticky-col pool-sticky-1" onclick="togglePoolHistory('{{ p.name }}')">
+            <td style="text-align:left;font-weight:600" class="player-name-cell pool-sticky-col pool-sticky-1" onclick="togglePoolHistory('{{ p.name|js_string }}')">
               <span class="expand-caret">▸</span> {{ p.name }}
             </td>
             <td style="text-align:left" class="pool-sticky-col pool-sticky-2 col-extra">{{ p.club }}</td>
