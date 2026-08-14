@@ -294,6 +294,35 @@ body.nav-open { overflow: hidden; }
   .data-table td .shortlist-star { min-height: 36px; padding: 8px 10px; }
 
 
+  /* ── Tab bars ─────────────────────────────────────────────────────────── */
+
+  /* Add/Drop has six tabs and Draft has three. At a 44px touch height they
+     wrap to three rows on a 375px screen -- roughly 150px of chrome before
+     any content. A single scrolling strip keeps them one row deep.
+     !important because .tab-bar carries its flex-wrap inline in both
+     history.html and draft.html, which no stylesheet rule can outrank. */
+  .tab-bar {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+    /* Bleed to the screen edges so the strip visibly runs off the side,
+       which is what signals it scrolls. */
+    margin-left: -12px;
+    margin-right: -12px;
+    padding-left: 12px;
+    padding-right: 12px;
+    scrollbar-width: none;
+  }
+  .tab-bar::-webkit-scrollbar { display: none; }
+
+  .tab-bar .tab-btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+
   /* ── Fixtures table ───────────────────────────────────────────────────── */
 
   /* The desktop design mirrors each row -- home left, "vs" centred, away and
@@ -310,6 +339,46 @@ body.nav-open { overflow: hidden; }
 
   .fixture-vs { text-align: left !important; padding-left: 14px; }
   .fixtures-table td { padding: 8px 10px; }
+
+
+  /* ── Filter bars ──────────────────────────────────────────────────────── */
+
+  /* Draft's filter row is seven flex columns; Add/Drop and Audit History have
+     smaller versions. They already wrap, but their children carry inline
+     flex/min-width/width values sized for a desktop row, so on a phone they
+     half-wrap into a ragged block that eats the screen before any data.
+     Give every child a full-width row instead.
+
+     !important throughout: every value being overridden here is an inline
+     style="" attribute in the template (flex:1;min-width:200px in
+     history.html, width:180px on the audit select, max-width:200px on the
+     draft-recap name field), and nothing but !important outranks those. */
+  .filter-bar { gap: 10px !important; }
+
+  .filter-bar > div {
+    flex: 1 1 100% !important;
+    min-width: 0 !important;
+    width: 100%;
+  }
+
+  .filter-bar input,
+  .filter-bar select {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* draft_recap puts its label and input on one line; let them stack. */
+  .filter-bar { flex-wrap: wrap !important; }
+
+
+  /* ── Transfer Room two-column layout ──────────────────────────────────── */
+
+  /* Inline flex:2/min-width:320px and flex:1/min-width:280px add up to 600px,
+     so on a phone they wrap but each still demands more width than exists. */
+  .transfers-cols > div {
+    flex: 1 1 100% !important;
+    min-width: 0 !important;
+  }
 
 
   /* ── Control rows ─────────────────────────────────────────────────────── */

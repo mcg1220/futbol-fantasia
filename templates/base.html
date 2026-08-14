@@ -165,6 +165,19 @@
       if (saved === '1') toggleAllCols(id, btn);
     });
 
+    // ── Keep the active tab visible in a scrolling tab strip ──────────────
+    // On mobile .tab-bar becomes a one-row horizontal scroller. Add/Drop
+    // restores its last tab from localStorage, so that tab can start off to
+    // the right where you'd never see it. Page scripts run before this one
+    // (they live inside <main>), so .active is already set by now.
+    // block:'nearest' keeps this from yanking the page vertically.
+    document.querySelectorAll('.tab-bar .tab-btn.active').forEach((btn) => {
+      const strip = btn.closest('.tab-bar');
+      if (strip && strip.scrollWidth > strip.clientWidth) {
+        btn.scrollIntoView({ inline: 'center', block: 'nearest' });
+      }
+    });
+
     // ── Scraper banner ─────────────────────────────────────────────────────
     const banner      = document.getElementById('scraperBanner');
     let   wasRunning  = false;
