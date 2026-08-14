@@ -2,13 +2,19 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>{% block title %}Fútbol de Fantasía{% endblock %}</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚽</text></svg>" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  <!-- Mobile styles. The media attribute gates the whole file, so anything wider
+       than 900px never applies a single rule from it and style.css stays
+       untouched. 900px is the nav breakpoint (measured: the header's flex row
+       bottoms out and starts overflowing at ~830px). Everything that is not the
+       nav is wrapped in a nested max-width:768px block inside the file. -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css') }}" media="(max-width: 900px)" />
   <script>
     (function() {
       const saved = localStorage.getItem('theme');
@@ -24,7 +30,13 @@
         <span class="brand-icon">🦁</span>
         <span class="brand-name">Fútbol de Fantasía</span>
       </div>
-      <nav class="site-nav">
+      <!-- Mobile drawer toggle. display:none above 768px, so desktop is unaffected. -->
+      <button type="button" class="nav-toggle" id="navToggle" aria-label="Menu" aria-expanded="false" aria-controls="siteNav" style="display:none">
+        <span class="nav-toggle-bar"></span>
+        <span class="nav-toggle-bar"></span>
+        <span class="nav-toggle-bar"></span>
+      </button>
+      <nav class="site-nav" id="siteNav">
         <a href="/"         class="nav-link {% if request.path == '/' %}active{% endif %}">⚽ Standings</a>
         <a href="/gameweek" class="nav-link {% if request.path.startswith('/gameweek') %}active{% endif %}">📅 Gameweek</a>
         <a href="/team"     class="nav-link {% if request.path.startswith('/team') %}active{% endif %}">👕 Teams</a>
@@ -97,6 +109,40 @@
         if (otherDropdown.open && !otherDropdown.contains(e.target)) {
           otherDropdown.open = false;
         }
+      });
+    }
+
+    // ── Mobile nav drawer ─────────────────────────────────────────────────
+    // The button only renders on mobile (display:none above 768px in
+    // mobile.css), so this is inert on desktop.
+    const navToggle = document.getElementById('navToggle');
+    if (navToggle) {
+      const closeNav = () => {
+        document.body.classList.remove('nav-open');
+        navToggle.setAttribute('aria-expanded', 'false');
+      };
+
+      navToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const open = document.body.classList.toggle('nav-open');
+        navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+
+      // Tapping a destination should close the drawer behind you.
+      document.getElementById('siteNav').addEventListener('click', (e) => {
+        if (e.target.closest('a')) closeNav();
+      });
+
+      // Same outside-click pattern as the "Other" dropdown above.
+      document.addEventListener('click', (e) => {
+        if (document.body.classList.contains('nav-open') &&
+            !e.target.closest('#siteNav') && !e.target.closest('#navToggle')) {
+          closeNav();
+        }
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeNav();
       });
     }
 

@@ -1,0 +1,298 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   mobile.css — phone/small-tablet styles for Fútbol de Fantasía
+
+   Linked from base.html with media="(max-width: 900px)", so nothing here is
+   ever applied above 900px. Desktop rendering is unaffected by construction,
+   and style.css is never edited.
+
+   Two breakpoints:
+     • 900px (this file's outer gate) — the NAV only. Measured: the header's
+       flex row compresses down to a floor of ~830px and overflows below that,
+       so the drawer has to take over before then. 900px gives margin.
+     • 768px (nested block below) — everything else: type, tables, forms,
+       modals, spacing.
+
+   This file loads AFTER style.css, so equal-specificity rules win on cascade
+   order alone. Two things to watch:
+     • Overriding a classed rule needs an equally specific selector. A bare
+       `select {}` (0,0,1) LOSES to `.gw-jump-select {}` (0,1,0) — that bit us
+       once already on the login PIN field. Mirror the desktop selector.
+     • !important is only for beating inline style="..." attributes, and each
+       use says why at the call site.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   NAV — applies up to 900px
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.header-inner {
+  padding: 0 14px;
+  /* Clear the notch in landscape; env() is 0 everywhere else. */
+  padding-left:  max(14px, env(safe-area-inset-left));
+  padding-right: max(14px, env(safe-area-inset-right));
+  gap: 12px;
+}
+
+.brand-name { font-size: 16px; }
+.brand-icon { font-size: 18px; }
+
+
+/* ── Hamburger toggle ────────────────────────────────────────────────────── */
+
+.nav-toggle {
+  /* !important is load-bearing here: the button carries an inline
+     style="display:none" in base.html so it stays hidden on desktop without
+     needing a rule in style.css. Only an !important can beat that inline
+     style, and this file is the only place that ever does. */
+  display: flex !important;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  width: 44px;
+  height: 44px;
+  padding: 0 10px;
+  margin-right: -10px;         /* keep the 44px target without visual inset */
+  background: none;
+  border: none;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.nav-toggle-bar {
+  display: block;
+  height: 2px;
+  width: 100%;
+  border-radius: 2px;
+  background: #FFFFFF;
+  transition: transform 0.2s ease, opacity 0.15s ease;
+}
+
+/* Morph into an ✕ while the drawer is open. */
+body.nav-open .nav-toggle-bar:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+body.nav-open .nav-toggle-bar:nth-child(2) { opacity: 0; }
+body.nav-open .nav-toggle-bar:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+
+/* ── Nav as a slide-in drawer ────────────────────────────────────────────── */
+
+.site-nav {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(82vw, 320px);
+  z-index: 200;
+
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+
+  padding: 16px 14px;
+  padding-top: max(16px, env(safe-area-inset-top));
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  padding-right: max(14px, env(safe-area-inset-right));
+
+  background: #37003C;
+  border-left: 2px solid #E90052;
+  box-shadow: -8px 0 28px rgba(0, 0, 0, 0.35);
+
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+
+  transform: translateX(100%);
+  transition: transform 0.22s ease;
+}
+
+body.nav-open .site-nav { transform: translateX(0); }
+
+/* Scrim behind the drawer, drawn without extra markup. */
+body.nav-open::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+body.nav-open { overflow: hidden; }
+
+.site-nav .nav-link {
+  display: flex;
+  align-items: center;
+  min-height: 44px;            /* Apple HIG minimum touch target */
+  padding: 10px 12px;
+  font-size: 15px;
+  border-radius: var(--radius-sm);
+}
+
+.nav-badge { min-width: 18px; height: 18px; font-size: 11px; }
+
+/* The "Other" group stays a <details> — an accordion reads well in a drawer,
+   and keeping it avoids fighting the UA styles that hide a closed details. */
+.nav-dropdown { width: 100%; }
+
+.nav-dropdown-menu {
+  position: static;            /* was absolute — unfold inline in the drawer */
+  min-width: 0;
+  margin: 2px 0 2px 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: none;
+  box-shadow: none;
+}
+
+.nav-dropdown-item {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.nav-dropdown-item:hover { background: rgba(255, 255, 255, 0.12); }
+
+/* Push the theme toggle and auth rows to the foot of the drawer. `order`
+   rather than :nth-child, because the child count changes with auth state. */
+.site-nav .theme-toggle {
+  order: 1;
+  margin-top: auto;
+  align-self: flex-start;
+  width: 44px;
+  height: 44px;
+  font-size: 20px;
+}
+
+.site-nav .theme-toggle ~ .nav-link {
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   EVERYTHING ELSE — phones only, 768px and below
+   ══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+
+  /* ── Layout ───────────────────────────────────────────────────────────── */
+
+  .site-main {
+    padding: 16px 12px;
+    padding-left:  max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+
+  .site-footer { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+
+  .scraper-banner {
+    padding-left:  max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+
+  .section { margin-bottom: 20px; }
+  .section-title { font-size: 18px; flex-wrap: wrap; }
+
+  img, canvas, iframe, video { max-width: 100%; }
+
+
+  /* ── Tables ───────────────────────────────────────────────────────────── */
+
+  .table-wrap,
+  .glance-wrap,
+  .pool-table-wrap,
+  .game-log-table-wrap {
+    -webkit-overflow-scrolling: touch;
+    /* Without this a sideways swipe on a wide table rubber-bands the page. */
+    overscroll-behavior-x: contain;
+  }
+
+  .data-table { font-size: 12px; }
+  .data-table th { padding: 8px; font-size: 10px; letter-spacing: 0.04em; }
+  .data-table td { padding: 8px; }
+
+
+  /* ── Form controls ────────────────────────────────────────────────────── */
+
+  /* iOS Safari force-zooms the whole page when you focus a control whose
+     computed font-size is under 16px — so today, logging in zooms the page.
+     The bare element selectors below are (0,0,1) and lose to every classed
+     rule in style.css, so each classed control has to be named explicitly at
+     matching specificity. Verified against a live audit of all 14 routes:
+     any control still under 16px will re-introduce the zoom. */
+  input,
+  select,
+  textarea,
+  .gw-jump-select,        /* style.css:573 — 13px; also the login PIN field */
+  .player-search-input,   /* style.css:977 — 13px */
+  .multi-select,          /* style.css:990 — 13px */
+  .team-name-input,       /* style.css:712 — 13px */
+  .slot-select            /* style.css:1076 — 11px */
+  {
+    font-size: 16px;
+    max-width: 100%;
+  }
+
+  input[type="checkbox"],
+  input[type="radio"] { width: 20px; height: 20px; }
+
+
+  /* ── Touch targets ────────────────────────────────────────────────────── */
+
+  /* .action-btn is display:inline-block in style.css:885; min-height alone
+     would not center the label, hence inline-flex. */
+  .action-btn,
+  .tab-btn,
+  .primary-btn,
+  .gw-arrow {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Deliberate exception to the 44px guideline: the draft pool is ~1,400 rows,
+     and 44px buttons in every row make it unscrollable. 36px stays comfortably
+     tappable while keeping the table a sane height. */
+  .data-table td .action-btn,
+  .data-table td .slot-action-btn,
+  .data-table td .shortlist-star { min-height: 36px; padding: 8px 10px; }
+
+
+  /* ── Control rows ─────────────────────────────────────────────────────── */
+
+  /* These are display:flex with no flex-wrap in style.css, so a row of a
+     select plus two buttons cannot break onto a second line and pushes the
+     page sideways. Bumping the selects to 16px above made them wider still,
+     so wrapping is what pays that back. */
+  .gw-nav        { flex-wrap: wrap; gap: 12px; }
+  .gw-jump       { flex-wrap: wrap; gap: 6px; margin-left: 0; }
+  .team-switcher { flex-wrap: wrap; gap: 8px; }
+
+  .gw-jump-select,
+  .team-switcher select { max-width: 100%; }
+
+
+  /* ── Modals become bottom sheets ──────────────────────────────────────── */
+
+  .modal-overlay { align-items: flex-end; padding: 0; }
+
+  /* style.css:1151 sets width:380px, which is wider than a 375px iPhone. */
+  .modal-box {
+    width: 100%;
+    max-width: 100%;
+    max-height: 88vh;
+    max-height: 88dvh;         /* dvh is iOS 15.4+; vh above is the fallback */
+    border-radius: 14px 14px 0 0;
+    padding: 18px 16px;
+    padding-bottom: max(18px, env(safe-area-inset-bottom));
+  }
+
+  /* Keep this after .modal-box, mirroring the order in style.css:1151/1156. */
+  .modal-box-wide {
+    width: 100%;
+    max-width: 100%;
+    max-height: 92vh;
+    max-height: 92dvh;
+  }
+
+}
