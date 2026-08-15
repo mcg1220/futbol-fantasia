@@ -343,7 +343,11 @@
             <td>{{ t.created_at[:16].replace('T', ' ') }}</td>
             <td>{{ t.manager_name }} — {{ t.team_name }}</td>
             <td>{% if t.added_player %}<span style="color:#2e7d32">+ {{ t.added_player }}</span>{% endif %}</td>
-            <td>{% if t.dropped_player %}<span style="color:#c62828">− {{ t.dropped_player }}</span>{% elif t.added_player %}<span style="color:var(--text-secondary)">Open Roster Spot</span>{% endif %}</td>
+            <td>
+              {% if t.dropped_player %}<span style="color:#c62828">− {{ t.dropped_player }}</span>
+              {% elif t.to_ir %}<span style="color:var(--pl-magenta)">🩹 Added straight to IR</span>
+              {% elif t.added_player %}<span style="color:var(--text-secondary)">Open Roster Spot</span>{% endif %}
+            </td>
             <td>{{ t.source }}</td>
           </tr>
           {% endfor %}
@@ -541,7 +545,18 @@ async function openDropModal(playerName, mode, title) {
     const roomButton = activeCount < 15
       ? `<button type="button" class="primary-btn" style="width:100%;margin-bottom:12px" onclick="confirmSwap(null)">✅ Add without dropping — you have an open roster spot</button>`
       : '';
-    rosterDiv.innerHTML = roomButton + (renderRosterPicker(roster) || (roomButton ? '' : '<div class="empty-state">No roster players found.</div>'));
+    // IR is a single reserved spot that doesn't count against the 15-man cap,
+    // so it can be open even when the active roster (starters+bench) is full
+    // — that's exactly the "add an injured free agent straight to IR" case.
+    // Waiver claims process later against whatever the roster looks like at
+    // that time, so there's no "IR is open right now" to check yet — this is
+    // instant-add only.
+    const irOpen = pendingMode === 'add' && !roster.some(r => r.slot_type === 'ir');
+    const irButton = irOpen
+      ? `<button type="button" class="primary-btn" style="width:100%;margin-bottom:12px" onclick="confirmSwap(null, true)">🩹 Add straight to IR — your IR slot is open</button>`
+      : '';
+    const noButtons = !roomButton && !irButton;
+    rosterDiv.innerHTML = roomButton + irButton + (renderRosterPicker(roster) || (noButtons ? '<div class="empty-state">No roster players found.</div>' : ''));
   } catch (e) {
     rosterDiv.innerHTML = '<div class="empty-state">Could not load roster — try closing and reopening this dialog.</div>';
     console.error(e);
@@ -561,14 +576,14 @@ function closeDropModal() {
   document.getElementById('drop-modal').style.display = 'none';
 }
 
-async function confirmSwap(dropPlayer) {
+async function confirmSwap(dropPlayer, toIr) {
   const addedPlayer = pendingAdd;
   const mode = pendingMode;
   try {
     const url = mode === 'claim' ? '/api/waiver/claim' : '/api/roster/swap';
     const body = mode === 'claim'
       ? { add_player: addedPlayer, drop_player: dropPlayer, gw: CURRENT_GW }
-      : { drop_player: dropPlayer, add_player: addedPlayer, gw: CURRENT_GW };
+      : { drop_player: dropPlayer, add_player: addedPlayer, gw: CURRENT_GW, to_ir: !!toIr };
 
     const res = await fetch(url, {
       method: 'POST',
@@ -587,6 +602,8 @@ async function confirmSwap(dropPlayer) {
           : `🟡 Waiver claim submitted — ${addedPlayer} added, no drop needed. Processes when the window closes.`)
       : (dropPlayer
           ? `✅ Added ${addedPlayer}, dropped ${dropPlayer}.`
+          : data.slot_type === 'ir'
+          ? `✅ Added ${addedPlayer} straight to IR — no drop needed.`
           : `✅ Added ${addedPlayer} — no drop needed, you had an open roster spot.`);
     sessionStorage.setItem('addDropConfirmation', JSON.stringify({ message, ts: Date.now() }));
     window.location.reload();

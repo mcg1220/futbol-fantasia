@@ -2384,7 +2384,7 @@ def count_active_roster_slots(conn, manager_id, gw):
     return row['cnt']
 
 
-def execute_roster_swap(conn, manager_id, add_player, drop_player, gw, source):
+def execute_roster_swap(conn, manager_id, add_player, drop_player, gw, source, to_ir=False):
     """
     Core roster swap: drop `drop_player` from manager_id's roster and add
     `add_player` in their place. If the incoming player is eligible for the
@@ -2393,8 +2393,13 @@ def execute_roster_swap(conn, manager_id, add_player, drop_player, gw, source):
 
     `drop_player` may be None/falsy — a pure add, only allowed when the
     manager has an open non-IR roster spot (see count_active_roster_slots).
-    The incoming player always lands on the bench in that case, since
-    there's no outgoing slot to inherit.
+    The incoming player lands on the bench in that case, UNLESS `to_ir` is
+    also set, in which case they go straight to IR instead — IR is a single
+    reserved spot that doesn't count against the 15-man cap (see
+    count_active_roster_slots's docstring), so this bypasses that cap check
+    entirely and only requires IR to currently be empty. `to_ir` only has an
+    effect when `drop_player` is falsy; a drop-and-add always follows the
+    existing inherit-the-dropped-slot-or-bench rule below.
 
     Shared by the instant Add/Drop endpoint and the waiver processing
     algorithm — `source` tags the resulting transaction ('roster_swap' or
@@ -2424,6 +2429,14 @@ def execute_roster_swap(conn, manager_id, add_player, drop_player, gw, source):
         locked, reason = is_change_locked(conn, DRAFT_SEASON, gw, drop_club, drop_row['slot_type'], None)
         if locked:
             return False, {"error": reason}
+    elif to_ir:
+        existing_ir = c.execute("""
+            SELECT 1 FROM rosters
+            WHERE manager_id=? AND slot_type='ir'
+              AND gw_start<=? AND (gw_end IS NULL OR gw_end>=?)
+        """, (manager_id, gw, gw)).fetchone()
+        if existing_ir:
+            return False, {"error": "Only one player can be on IR at a time."}
     else:
         if count_active_roster_slots(conn, manager_id, gw) >= PLAYER_PICKS_PER_TEAM:
             return False, {"error": "Your roster is full — drop a player to add someone new (or free up a spot by moving someone to IR)."}
@@ -2444,6 +2457,12 @@ def execute_roster_swap(conn, manager_id, add_player, drop_player, gw, source):
     if drop_row and drop_row['position_slot'] in eligible:
         new_slot_type = drop_row['slot_type']
         new_position_slot = drop_row['position_slot']
+    elif to_ir:
+        # Matches the literal 'ir'/'ir' convention update_roster_slot() uses
+        # (team.html's slot <select> sends value="ir|ir") — IR isn't a real
+        # position, so position_slot is the marker string, not a position code.
+        new_slot_type = 'ir'
+        new_position_slot = 'ir'
     else:
         new_slot_type = 'bench'
         new_position_slot = sorted(eligible)[0] if eligible else None
@@ -2460,10 +2479,12 @@ def execute_roster_swap(conn, manager_id, add_player, drop_player, gw, source):
         VALUES (?, ?, ?, ?, ?, NULL)
     """, (manager_id, add_player, new_slot_type, new_position_slot, gw))
 
+    landed_on_ir = new_slot_type == 'ir'
     c.execute("""
-        INSERT INTO transactions (manager_id, added_player, dropped_player, source, gw, season, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (manager_id, add_player, drop_player, source, gw, DRAFT_SEASON, now_eastern_naive().isoformat()))
+        INSERT INTO transactions (manager_id, added_player, dropped_player, source, gw, season, created_at, to_ir)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (manager_id, add_player, drop_player, source, gw, DRAFT_SEASON, now_eastern_naive().isoformat(),
+          1 if landed_on_ir else 0))
 
     # Transfer-draft picks log their own richer entry (round/draft type) at
     # the call site, since a pass there never reaches this function at all —
@@ -2471,9 +2492,14 @@ def execute_roster_swap(conn, manager_id, add_player, drop_player, gw, source):
     if not source.endswith('_transfer_draft'):
         action = 'waiver_claim' if source == 'waiver_claim' else 'add_drop'
         summary = f"{gw_change_label(conn, DRAFT_SEASON, gw)} — Added {add_player}"
-        summary += f", dropped {drop_player}" if drop_player else " (no drop — had an open roster spot)"
+        if drop_player:
+            summary += f", dropped {drop_player}"
+        elif landed_on_ir:
+            summary += " — placed directly on IR (no drop needed)"
+        else:
+            summary += " (no drop — had an open roster spot)"
         log_audit(conn, manager_id, 'roster', action, summary,
-                  {"added": add_player, "dropped": drop_player, "gw": gw, "source": source})
+                  {"added": add_player, "dropped": drop_player, "gw": gw, "source": source, "to_ir": landed_on_ir})
 
     return True, {"slot_type": new_slot_type, "position_slot": new_position_slot}
 
@@ -2484,13 +2510,14 @@ def swap_roster_player():
     manager_id  = current_manager_id()
     drop_player = data.get('drop_player') or None
     add_player  = data.get('add_player')
+    to_ir       = bool(data.get('to_ir'))
     gw          = data.get('gw')
 
     if not add_player or not gw:
         return jsonify({"error": "Missing required fields"}), 400
 
     conn = get_db()
-    ok, info = execute_roster_swap(conn, manager_id, add_player, drop_player, gw, 'roster_swap')
+    ok, info = execute_roster_swap(conn, manager_id, add_player, drop_player, gw, 'roster_swap', to_ir=to_ir)
     if not ok:
         conn.close()
         status = 404 if 'not on this roster' in info['error'] else 409
