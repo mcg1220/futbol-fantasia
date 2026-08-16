@@ -5,11 +5,6 @@
 <section class="section">
   <h2 class="section-title">🎙️ Draft Recap — {{ season }}</h2>
 
-  <div class="table-wrap filter-bar" style="padding:16px 20px;margin-bottom:16px;display:flex;gap:12px;align-items:center">
-    <label class="gw-jump-label">Your name (for comments)</label>
-    <input type="text" id="commenter-name" class="player-search-input" style="max-width:200px" placeholder="e.g. Mike" />
-  </div>
-
   {% for m in managers %}
   <div class="table-wrap draft-recap-card" style="padding:20px;margin-bottom:20px">
     <div class="team-header-left" style="margin-bottom:14px">
@@ -52,10 +47,14 @@
                 <div class="draft-comment"><strong>{{ c.author_name }}:</strong> {{ c.comment }}</div>
                 {% endfor %}
               </div>
+              {% if current_manager_id %}
               <div style="display:flex;gap:8px;margin-top:8px">
                 <input type="text" class="player-search-input" id="pick-comment-input-{{ p.id }}" placeholder="Add a comment on this pick..." style="flex:1" />
                 <button type="button" class="action-btn" onclick="postComment('pick', {{ p.id }})">Post</button>
               </div>
+              {% else %}
+              <div class="text-muted-cell" style="margin-top:8px">🔒 Log in to comment.</div>
+              {% endif %}
             </td>
           </tr>
           {% else %}
@@ -72,34 +71,43 @@
         <div class="draft-comment"><strong>{{ c.author_name }}:</strong> {{ c.comment }}</div>
         {% endfor %}
       </div>
+      {% if current_manager_id %}
       <div style="display:flex;gap:8px;margin-top:8px">
         <input type="text" class="player-search-input" id="team-comment-input-{{ m.id }}" placeholder="Add a comment on this team's overall draft..." style="flex:1" />
         <button type="button" class="action-btn" onclick="postComment('team', {{ m.id }})">Post</button>
       </div>
+      {% else %}
+      <div class="text-muted-cell" style="margin-top:8px">🔒 Log in to comment.</div>
+      {% endif %}
     </div>
   </div>
   {% endfor %}
 </section>
 
 <script>
+const CURRENT_MANAGER_ID = {{ current_manager_id|tojson }};
+const CURRENT_MANAGER_NAME = {{ current_manager_name|tojson }};
+
 function togglePickComments(pickId) {
   const row = document.getElementById(`pick-comments-${pickId}`);
   row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
 }
 
 async function postComment(targetType, targetId) {
-  const author = document.getElementById('commenter-name').value.trim();
-  if (!author) { alert('Enter your name first.'); return; }
+  if (!CURRENT_MANAGER_ID) { alert('Log in first to comment.'); return; }
 
   const inputId = targetType === 'pick' ? `pick-comment-input-${targetId}` : `team-comment-input-${targetId}`;
   const input = document.getElementById(inputId);
   const comment = input.value.trim();
   if (!comment) return;
 
+  // author_name is accepted here but the server ignores it and derives the
+  // real author from the logged-in session — kept only so this still reads
+  // clearly as "who this is nominally from" if the payload is inspected.
   const res = await fetch('/api/draft/comment', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ target_type: targetType, target_id: targetId, author_name: author, comment })
+    body: JSON.stringify({ target_type: targetType, target_id: targetId, comment })
   });
   if (!res.ok) { alert('Could not post comment'); return; }
 
@@ -107,7 +115,10 @@ async function postComment(targetType, targetId) {
   const list = document.getElementById(listId);
   const div = document.createElement('div');
   div.className = 'draft-comment';
-  div.innerHTML = `<strong>${author}:</strong> ${comment}`;
+  const strong = document.createElement('strong');
+  strong.textContent = CURRENT_MANAGER_NAME + ':';
+  div.appendChild(strong);
+  div.appendChild(document.createTextNode(' ' + comment));
   list.appendChild(div);
   input.value = '';
 }
