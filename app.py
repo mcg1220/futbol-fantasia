@@ -1579,6 +1579,7 @@ def team(manager_id):
     ir       = [r for r in roster_rows if r['slot_type'] == 'ir']
 
     position_check = check_position_counts(conn, manager_id, current_gw)
+    ir_check = check_ir_eligibility(conn, manager_id, current_gw)
 
     gw_locked  = is_gw_locked(conn, season, current_gw)
     locked_map = {
@@ -1703,6 +1704,7 @@ def team(manager_id):
         season=season,
         scraper_status=read_scraper_status(),
         position_check=position_check,
+        ir_check=ir_check,
         gw_locked=gw_locked,
         locked_map=locked_map,
         future_gws=future_gws,
@@ -2805,6 +2807,29 @@ def check_position_counts(conn, manager_id, gw):
     return {'positions': positions, 'ok': ok}
 
 
+def check_ir_eligibility(conn, manager_id, gw):
+    """False if the manager's current IR occupant appeared in a raw_stats
+    row for gw-1 (i.e. was in their club's live matchday squad, including an
+    unused healthy scratch) -- meaning they weren't actually unavailable and
+    shouldn't have been parked on IR. Mirrors check_position_counts's shape.
+    Returns {'ok': bool, 'player_name': str|None, 'club': str|None}."""
+    if gw <= 1:
+        return {'ok': True, 'player_name': None, 'club': None}
+    row = conn.execute("""
+        SELECT r.player_name, p.club
+        FROM rosters r
+        LEFT JOIN players p ON p.name = r.player_name
+        WHERE r.manager_id=? AND r.slot_type='ir'
+          AND r.gw_start<=? AND (r.gw_end IS NULL OR r.gw_end>=?)
+    """, (manager_id, gw, gw)).fetchone()
+    if not row:
+        return {'ok': True, 'player_name': None, 'club': None}
+    appeared = conn.execute("""
+        SELECT 1 FROM raw_stats WHERE player_name=? AND gw_number=? AND external=0 LIMIT 1
+    """, (row['player_name'], gw - 1)).fetchone()
+    return {'ok': appeared is None, 'player_name': row['player_name'], 'club': row['club']}
+
+
 def gw_fully_scraped(conn, season, gw_number):
     """True only if every fixture in this gw has at least one raw_stats row
     — i.e. the whole gameweek has actually been played and captured, not
@@ -2859,11 +2884,19 @@ def finalize_gw_results(conn, gw_number, season=DRAFT_SEASON):
         for manager_id in (mu['team_a_id'], mu['team_b_id']):
             raw_score, _ = calc_team_score_for_gw(conn, manager_id, gw_number, season=season)
             formation_ok = check_position_counts(conn, manager_id, gw_number)['ok']
-            final_score = raw_score if formation_ok else 0.0
+            ir_ok = check_ir_eligibility(conn, manager_id, gw_number)['ok']
+            final_score = raw_score if (formation_ok and ir_ok) else 0.0
             if not formation_ok:
                 log_audit(
                     conn, manager_id, 'scoring', 'invalid_lineup_penalty',
                     f"GW{gw_number}: lineup wasn't formation-valid at last kickoff — "
+                    f"score forced to 0 (would have been {round(raw_score, 2)})",
+                    {"gw_number": gw_number, "season": season, "raw_score": raw_score}
+                )
+            if not ir_ok:
+                log_audit(
+                    conn, manager_id, 'scoring', 'ir_violation_penalty',
+                    f"GW{gw_number}: IR occupant was in their club's squad the prior gameweek — "
                     f"score forced to 0 (would have been {round(raw_score, 2)})",
                     {"gw_number": gw_number, "season": season, "raw_score": raw_score}
                 )

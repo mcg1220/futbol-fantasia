@@ -468,6 +468,13 @@
 {% if ir %}
 <section class="section">
   <h3 class="section-title">🏥 Injury Reserve</h3>
+  {% if not ir_check.ok %}
+  <div class="lineup-warning">
+    ⚠️ {{ ir_check.player_name }} was in {{ ir_check.club }}'s matchday squad for GW{{ current_gw - 1 }}
+    (including as an unused sub) — they weren't actually unavailable. If they're not removed from IR
+    before this gameweek locks, your <strong>entire team</strong> will score 0 points for GW{{ current_gw }}.
+  </div>
+  {% endif %}
   {{ roster_table(ir, False, 'ir', 'table-ir') }}
 </section>
 {% endif %}
