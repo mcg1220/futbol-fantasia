@@ -1461,17 +1461,16 @@ def team(manager_id):
 
     player_names = [r['player_name'] for r in roster_rows]
 
-    club_map = {}
-    if player_names:
-        ph = ','.join('?' * len(player_names))
-        club_rows = c.execute(f"""
-            SELECT player_name, club
-            FROM raw_stats
-            WHERE player_name IN ({ph})
-            GROUP BY player_name
-            HAVING MAX(gw_number)
-        """, player_names).fetchall()
-        club_map = {r['player_name']: r['club'] for r in club_rows}
+    # Club must come from the live players.club join already on roster_rows
+    # (p.club, above) — not from raw_stats. raw_stats rows are tagged with
+    # whatever club a player was on for that historical match, so for anyone
+    # who has since transferred it silently returns their OLD club (West Ham
+    # for a player now at Tottenham), and for a brand-new-to-the-league
+    # signing with only backfilled foreign-league history it can return a
+    # club that was never even in the Premier League (e.g. "Braga"). This is
+    # also what plan_club_map (below) and history()/draft_page() already do
+    # correctly — this was the one place still reading the stale source.
+    club_map = {r['player_name']: r['club'] for r in roster_rows}
 
     # Eligibility map: player_name -> sorted list of eligible position codes
     eligibility_map = {}
