@@ -2926,13 +2926,22 @@ def get_waiver_order(conn, season):
 
 
 def seed_waiver_order_if_needed(conn, season):
-    """Initial waiver order = reverse draft order, per spec. Seeded once,
-    lazily, the first time a window is opened."""
+    """Initial waiver order = reverse Round 1 draft order, per spec. Seeded
+    once, lazily, the first time a window is opened.
+
+    Sourced from draft_picks (the actual, final record of who picked what),
+    not draft_order.pick_slot (the pre-draft randomizer slot). Those two
+    diverge whenever a Round 1 pick was traded before the draft started —
+    pick_slot never moves with a traded pick, only draft_picks.manager_id
+    does — so deriving from pick_slot silently produces the wrong order
+    whenever a Round 1 trade happened. See scripts/fix_gw1_waiver_order.py
+    for a one-off repair of a season already seeded the old, wrong way.
+    """
     existing = conn.execute("SELECT 1 FROM waiver_order WHERE season=? LIMIT 1", (season,)).fetchone()
     if existing:
         return
     draft_rows = conn.execute(
-        "SELECT manager_id FROM draft_order WHERE season=? ORDER BY pick_slot DESC", (season,)
+        "SELECT manager_id FROM draft_picks WHERE season=? AND round=1 ORDER BY overall_pick DESC", (season,)
     ).fetchall()
     for i, row in enumerate(draft_rows, start=1):
         conn.execute(
