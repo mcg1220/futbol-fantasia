@@ -81,6 +81,10 @@ body {
   position: sticky;
   top: 0;
   z-index: 100;
+  /* 0 in a normal browser tab (Safari's own chrome already clears the
+     notch/status bar); only non-zero when launched standalone from the
+     iOS home screen, where the page draws under the status bar. */
+  padding-top: env(safe-area-inset-top);
 }
 
 .header-inner {
