@@ -80,8 +80,13 @@
       <div class="pts-note" style="margin:4px 0 8px">
         Server scrapes are unreliable right now — copy this and run it on your own machine instead
         (see <a href="https://github.com/mcg1220/futbol-fantasia/blob/main/scripts/scrape_and_upload.py" target="_blank" rel="noopener">scrape_and_upload.py</a>).
-        Your manager id:
-        <input type="number" id="localScrapeManagerId" value="{{ current_manager_id or '' }}" style="width:50px" oninput="updateLocalScrapeCommand()" />
+        Running this yourself:
+        <select id="localScrapeManagerId" onchange="updateLocalScrapeCommand()">
+          <option value="" disabled {% if not current_manager_id %}selected{% endif %}>Pick your name…</option>
+          {% for m in managers %}
+          <option value="{{ m.id }}" {% if m.id == current_manager_id %}selected{% endif %}>{{ m.name }}</option>
+          {% endfor %}
+        </select>
       </div>
       <div style="display:flex;gap:8px">
         <input type="text" id="localScrapeCommand" readonly style="flex:1;font-family:monospace;font-size:12px" onclick="this.select()" />

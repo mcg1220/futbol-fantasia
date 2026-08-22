@@ -1350,6 +1350,8 @@ def gameweek(gw=None):
 
     day_groups = build_fixture_day_groups(fixture_rows)
 
+    managers = c.execute("SELECT id, name FROM managers ORDER BY name").fetchall()
+
     conn.close()
 
     return render_template('gameweek.html',
@@ -1361,6 +1363,7 @@ def gameweek(gw=None):
         season=season,
         scraper_status=read_scraper_status(),
         badges=badges,
+        managers=managers,
     )
 
 
