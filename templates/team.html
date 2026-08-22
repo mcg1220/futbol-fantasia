@@ -270,8 +270,8 @@
               <div class="stat-group">
                 <div class="stat-group-label">Team Events</div>
                 <div class="stat-grid">
-                  <div class="stat-item"><span class="stat-label">Clean Sheet</span><span class="stat-val stat-pending" title="Computed from match result">—</span></div>
-                  <div class="stat-item"><span class="stat-label">Goals Conceded</span><span class="stat-val stat-pending" title="Computed from match result">—</span></div>
+                  <div class="stat-item"><span class="stat-label">Clean Sheet</span><span class="stat-val {% if not s or s.clean_sheet is not defined %}stat-pending{% endif %}" title="60+ mins played, 0 conceded">{% if s and s.clean_sheet is defined %}{{ '✓' if s.clean_sheet else '✗' }}{% else %}—{% endif %}</span></div>
+                  <div class="stat-item"><span class="stat-label">Goals Conceded</span><span class="stat-val {% if not s or s.goals_conceded is not defined %}stat-pending{% endif %}" title="Computed from match result">{{ s.goals_conceded if s and s.goals_conceded is defined else '—' }}</span></div>
                 </div>
               </div>
               {% endif %}

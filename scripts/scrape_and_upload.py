@@ -18,10 +18,12 @@ safe to re-run, it skips players already saved for that match).
 
 Usage:
     python3 scrape_and_upload.py --match_id 1983547 --gw 1 --manager_id 2
+    python3 scrape_and_upload.py --match_id 1983547,1983548,1983549 --gw 1 --manager_id 2
     python3 scrape_and_upload.py --match_id 1983547 --gw 1 --manager_id 2 --site http://localhost:5050
 
-You'll be prompted for your PIN (not passed on the command line, so it
-doesn't end up in shell history).
+--match_id accepts a comma-separated list to do several matches in one
+run (one login, one at a time). You'll be prompted for your PIN (not
+passed on the command line, so it doesn't end up in shell history).
 """
 import argparse
 import getpass
@@ -154,11 +156,14 @@ def upload(opener, site, match_id, gw, home_team, away_team, goals_home, goals_a
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--match_id", type=int, required=True)
+    ap.add_argument("--match_id", type=str, required=True,
+                     help="One match_id, or a comma-separated list (e.g. 1983546,1983548) to do several in one run")
     ap.add_argument("--gw", type=int, required=True)
     ap.add_argument("--manager_id", type=int, required=True, help="Your manager id (same as the login dropdown)")
     ap.add_argument("--site", type=str, default=DEFAULT_SITE)
     args = ap.parse_args()
+
+    match_ids = [int(m) for m in str(args.match_id).split(',') if m.strip()]
 
     pin = getpass.getpass("PIN: ")
 
@@ -169,16 +174,28 @@ def main():
     login(opener, args.site, args.manager_id, pin)
     print("Logged in.")
 
-    players, home_team, away_team, goals_home, goals_away = scrape_match_plain_playwright(args.match_id)
+    succeeded, failed = [], []
+    for i, match_id in enumerate(match_ids, start=1):
+        print(f"\n[{i}/{len(match_ids)}] match_id={match_id}")
+        try:
+            players, home_team, away_team, goals_home, goals_away = scrape_match_plain_playwright(match_id)
+            if len(players) < scraper.MIN_EXPECTED_PLAYERS:
+                print("  Scrape failed (not enough players captured) -- not uploading this one.")
+                failed.append(match_id)
+                continue
+            print(f"  Uploading to {args.site}...")
+            result = upload(opener, args.site, match_id, args.gw, home_team, away_team,
+                             goals_home, goals_away, players)
+            print(f"  Done: {result}")
+            succeeded.append(match_id)
+        except Exception as e:
+            print(f"  Error on match {match_id}: {e}")
+            failed.append(match_id)
 
-    if len(players) < scraper.MIN_EXPECTED_PLAYERS:
-        print("Scrape failed -- not uploading.")
+    print(f"\n{len(succeeded)}/{len(match_ids)} match(es) uploaded successfully.")
+    if failed:
+        print(f"Failed/skipped: {failed}")
         sys.exit(1)
-
-    print(f"\nUploading to {args.site}...")
-    result = upload(opener, args.site, args.match_id, args.gw, home_team, away_team,
-                     goals_home, goals_away, players)
-    print(f"Done: {result}")
 
 
 if __name__ == '__main__':

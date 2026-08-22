@@ -302,10 +302,11 @@ def format_kickoff(match_date, kickoff_time):
 
 
 def get_gw_fixture_info(conn, season, gw_number):
-    """club -> {'opponent', 'date', 'time'} for a single gameweek. `date`/`time`
-    are the formatted strings from format_kickoff (None if not yet scheduled)."""
+    """club -> {'opponent', 'date', 'time', 'match_id'} for a single gameweek.
+    `date`/`time` are the formatted strings from format_kickoff (None if not
+    yet scheduled)."""
     rows = conn.execute("""
-        SELECT f.home_club, f.away_club, f.match_date, f.kickoff_time
+        SELECT f.match_id, f.home_club, f.away_club, f.match_date, f.kickoff_time
         FROM fixtures f
         JOIN gameweeks g ON g.id = f.gw_id
         WHERE g.gw_number = ? AND f.season = ?
@@ -315,7 +316,7 @@ def get_gw_fixture_info(conn, season, gw_number):
     for r in rows:
         date_label, time_label = format_kickoff(r['match_date'], r['kickoff_time'])
         for club, opponent in ((r['home_club'], r['away_club']), (r['away_club'], r['home_club'])):
-            info[club] = {'opponent': opponent, 'date': date_label, 'time': time_label}
+            info[club] = {'opponent': opponent, 'date': date_label, 'time': time_label, 'match_id': r['match_id']}
     return info
 
 
@@ -1591,7 +1592,29 @@ def team(manager_id):
             WHERE match_id IN ({ph_m}) AND player_name IN ({ph_p})
             GROUP BY player_name
         """, season_match_ids + player_names).fetchall()
-        stats_map = {r['player_name']: r for r in stats_rows}
+        stats_map = {r['player_name']: dict(r) for r in stats_rows}
+
+    # Clean sheet / goals conceded for this gw's DEF/GK -- mirrors
+    # calc_player_score's own rule (60+ mins, 0 conceded, non-external row)
+    # exactly, so the display matches what actually got scored.
+    for player in roster_rows:
+        name = player['player_name']
+        pos = (player['position_slot'] or '').upper()
+        s = stats_map.get(name)
+        if pos not in ('DEF', 'GK') or not s:
+            continue
+        club = club_map.get(name)
+        match_id = fixture_info.get(club, {}).get('match_id') if club else None
+        if not match_id:
+            continue
+        ext_row = c.execute(
+            "SELECT external FROM raw_stats WHERE match_id=? AND player_name=?", (match_id, name)
+        ).fetchone()
+        if ext_row and ext_row['external']:
+            continue
+        conceded = get_team_goals_conceded(conn, match_id, club)
+        s['goals_conceded'] = conceded
+        s['clean_sheet'] = 1 if (s.get('minutes') and s['minutes'] >= 60 and conceded == 0) else 0
 
     POS_ORDER = {'FW': 0, 'MID': 1, 'DEF': 2, 'GK': 3}
 

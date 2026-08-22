@@ -74,6 +74,21 @@
       <button type="button" class="primary-btn" id="confirmScrapeBtn" onclick="confirmScrape({{ gw }})">🔄 Scrape Selected</button>
       <button type="button" class="action-btn" onclick="closeScrapeModal()">Cancel</button>
     </div>
+
+    <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
+      <div class="gw-jump-label">Or run it yourself, locally</div>
+      <div class="pts-note" style="margin:4px 0 8px">
+        Server scrapes are unreliable right now — copy this and run it on your own machine instead
+        (see <a href="https://github.com/mcg1220/futbol-fantasia/blob/main/scripts/scrape_and_upload.py" target="_blank" rel="noopener">scrape_and_upload.py</a>).
+        Your manager id:
+        <input type="number" id="localScrapeManagerId" value="{{ current_manager_id or '' }}" style="width:50px" oninput="updateLocalScrapeCommand()" />
+      </div>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="localScrapeCommand" readonly style="flex:1;font-family:monospace;font-size:12px" onclick="this.select()" />
+        <button type="button" class="action-btn" onclick="copyLocalScrapeCommand()">📋 Copy</button>
+      </div>
+      <div id="localScrapeCopyNote" class="pts-note" style="display:none;margin-top:4px">Copied!</div>
+    </div>
   </div>
 </div>
 
@@ -241,10 +256,37 @@ function updateScrapeSelectionNote() {
   const boxes = getFixtureCheckboxes();
   const selected = boxes.filter(cb => cb.checked).length;
   document.getElementById('scrapeSelectedCount').textContent = `${selected} of ${boxes.length} matches`;
+  updateLocalScrapeCommand();
+}
+
+function updateLocalScrapeCommand(gw) {
+  gw = gw ?? window.__scrapeModalGw;
+  window.__scrapeModalGw = gw;
+  const matchIds = getFixtureCheckboxes().filter(cb => cb.checked).map(cb => cb.value).join(',');
+  const managerId = document.getElementById('localScrapeManagerId').value || '<your_manager_id>';
+  const cmd = matchIds
+    ? `cd scripts && python3 scrape_and_upload.py --match_id ${matchIds} --gw ${gw} --manager_id ${managerId}`
+    : '';
+  document.getElementById('localScrapeCommand').value = cmd;
+}
+
+function copyLocalScrapeCommand() {
+  const input = document.getElementById('localScrapeCommand');
+  input.select();
+  const showCopied = () => {
+    const note = document.getElementById('localScrapeCopyNote');
+    note.style.display = 'block';
+    setTimeout(() => note.style.display = 'none', 1500);
+  };
+  // Clipboard write can be denied by the browser (permissions, insecure
+  // context) -- input.select() above already leaves the text selected as
+  // a manual copy-paste fallback either way.
+  navigator.clipboard.writeText(input.value).then(showCopied, () => {});
 }
 
 function openScrapeModal() {
   setAllFixtureChecks(true);
+  updateLocalScrapeCommand({{ gw }});
   document.getElementById('scrapeSelectModal').style.display = 'flex';
 }
 
