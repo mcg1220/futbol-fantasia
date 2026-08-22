@@ -403,12 +403,12 @@ def build_fixture_day_groups(fixture_rows):
             groups.append({'label': date_obj.strftime('%A, %B %-d'), 'matches': []})
         _, time_label = format_kickoff(r['match_date'], r['kickoff_time'])
         groups[-1]['matches'].append({
-            'home_club': r['home_club'], 'away_club': r['away_club'], 'time': time_label
+            'match_id': r['match_id'], 'home_club': r['home_club'], 'away_club': r['away_club'], 'time': time_label
         })
 
     if unscheduled:
         groups.append({'label': None, 'matches': [
-            {'home_club': r['home_club'], 'away_club': r['away_club'], 'time': None}
+            {'match_id': r['match_id'], 'home_club': r['home_club'], 'away_club': r['away_club'], 'time': None}
             for r in unscheduled
         ]})
 
@@ -1316,7 +1316,7 @@ def gameweek(gw=None):
     """, (season, gw)).fetchall()
 
     fixture_rows = c.execute("""
-        SELECT f.home_club, f.away_club, f.match_date, f.kickoff_time
+        SELECT f.match_id, f.home_club, f.away_club, f.match_date, f.kickoff_time
         FROM fixtures f
         JOIN gameweeks g ON g.id = f.gw_id
         WHERE g.gw_number = ? AND f.season = ?
@@ -4644,15 +4644,22 @@ def scrape_watchdog(proc, killed_event):
         pass
 
 
-def start_scrape(gw, trigger='manual'):
+def start_scrape(gw, trigger='manual', match_ids=None):
     """Shared by the manual 'Press the Button' route and the auto-scrape
     poller — launches the subprocess, writes the running status (with its
     pid, atomically — see run_scraper_background's docstring for why),
     then hands the already-running proc off to a background thread to
     stream and report on. Caller is responsible for checking the scraper
-    isn't already running."""
+    isn't already running.
+
+    match_ids, if given, scrapes only those fixtures instead of the whole
+    gw — lets someone re-run just the match(es) they care about instead of
+    waiting on every fixture in the gameweek."""
+    cmd = [sys.executable, 'scrape_gw.py', '--gw', str(gw), '--season', '2026-27']
+    if match_ids:
+        cmd += ['--match_ids', ','.join(str(m) for m in match_ids)]
     proc = subprocess.Popen(
-        [sys.executable, 'scrape_gw.py', '--gw', str(gw), '--season', '2026-27'],
+        cmd,
         cwd=SCRIPTS_DIR,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -4702,7 +4709,15 @@ def trigger_scrape():
 
     data = request.get_json() or {}
     gw   = int(data.get('gw', 1))
-    start_scrape(gw, trigger='manual')
+    match_ids = data.get('match_ids') or None
+    if match_ids is not None:
+        try:
+            match_ids = [int(m) for m in match_ids]
+        except (TypeError, ValueError):
+            return jsonify({"error": "match_ids must be a list of integers"}), 400
+        if not match_ids:
+            return jsonify({"error": "match_ids was empty — select at least one match"}), 400
+    start_scrape(gw, trigger='manual', match_ids=match_ids)
 
     return jsonify({"status": "started", "gw": gw})
 

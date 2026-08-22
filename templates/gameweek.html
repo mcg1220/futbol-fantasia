@@ -40,6 +40,11 @@
       🔄 Press the Button
     </button>
   </div>
+  <div class="pts-note" id="scrapeSelectionNote" style="margin-top:6px">
+    <span id="scrapeSelectedCount"></span> selected — uncheck fixtures below to scrape only some.
+    <a href="#" onclick="setAllFixtureChecks(true); return false;">Select all</a> ·
+    <a href="#" onclick="setAllFixtureChecks(false); return false;">Select none</a>
+  </div>
 </section>
 
 <!-- ── Button-press fun overlay ─────────────────────────────────────────── -->
@@ -115,6 +120,7 @@
     <table class="data-table fixtures-table">
       <thead>
         <tr>
+          <th style="text-align:center">Scrape</th>
           <th style="text-align:left">Home</th>
           <th></th>
           <th style="text-align:right">Away</th>
@@ -124,10 +130,13 @@
       <tbody>
         {% for group in day_groups %}
           {% if group.label %}
-          <tr class="fixture-day-row"><td colspan="4" class="fixture-day-label">{{ group.label }}</td></tr>
+          <tr class="fixture-day-row"><td colspan="5" class="fixture-day-label">{{ group.label }}</td></tr>
           {% endif %}
           {% for f in group.matches %}
           <tr>
+            <td style="text-align:center">
+              <input type="checkbox" class="fixture-scrape-check" value="{{ f.match_id }}" checked onchange="updateScrapeSelectionNote()" />
+            </td>
             <td class="fixture-team fixture-home">
               <span class="fixture-team-inner">
                 {% if badges.get(f.home_club) %}
@@ -191,7 +200,30 @@ function showButtonFun() {
   }, 3000));
 }
 
+function getFixtureCheckboxes() {
+  return Array.from(document.querySelectorAll('.fixture-scrape-check'));
+}
+
+function setAllFixtureChecks(checked) {
+  getFixtureCheckboxes().forEach(cb => cb.checked = checked);
+  updateScrapeSelectionNote();
+}
+
+function updateScrapeSelectionNote() {
+  const boxes = getFixtureCheckboxes();
+  const selected = boxes.filter(cb => cb.checked).length;
+  document.getElementById('scrapeSelectedCount').textContent = `${selected} of ${boxes.length} matches`;
+}
+updateScrapeSelectionNote();
+
 async function triggerScrape(gw) {
+  const boxes = getFixtureCheckboxes();
+  const matchIds = boxes.filter(cb => cb.checked).map(cb => parseInt(cb.value, 10));
+  if (boxes.length && matchIds.length === 0) {
+    alert('Select at least one match to scrape.');
+    return;
+  }
+
   const btn = document.getElementById('scrapeBtn');
   btn.disabled = true;
   btn.textContent = '⏳ Starting...';
@@ -202,7 +234,7 @@ async function triggerScrape(gw) {
     const res = await fetch('/api/scrape', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ gw })
+      body: JSON.stringify({ gw, match_ids: matchIds })
     });
     const data = await res.json();
     await funPromise;

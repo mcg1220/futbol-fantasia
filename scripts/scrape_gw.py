@@ -55,27 +55,34 @@ def run_match_scrape(cmd, timeout):
     return SimpleNamespace(stdout=stdout, stderr=stderr, returncode=proc.returncode)
 
 
-def get_match_ids_for_gw(gw_number, season='2026-27'):
-    """Return all match IDs for a given gameweek and season."""
+def get_match_ids_for_gw(gw_number, season='2026-27', match_ids=None):
+    """Return match IDs for a given gameweek and season — all of them, or
+    just the subset in match_ids if given (lets a caller re-scrape only the
+    fixture(s) they care about instead of the whole gameweek)."""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    rows = c.execute("""
+    query = """
         SELECT f.match_id, f.home_club, f.away_club
         FROM fixtures f
         JOIN gameweeks g ON f.gw_id = g.id
         WHERE g.gw_number = ? AND f.season = ?
-        ORDER BY f.match_id
-    """, (gw_number, season)).fetchall()
+    """
+    params = [gw_number, season]
+    if match_ids:
+        query += f" AND f.match_id IN ({','.join('?' * len(match_ids))})"
+        params += list(match_ids)
+    query += " ORDER BY f.match_id"
+    rows = c.execute(query, params).fetchall()
     conn.close()
     return rows
 
 
-def scrape_gw(gw_number, rescrape=False, compare=False, delay=4, season='2026-27'):
-    """Scrape all matches for a gameweek."""
-    matches = get_match_ids_for_gw(gw_number, season)
+def scrape_gw(gw_number, rescrape=False, compare=False, delay=4, season='2026-27', match_ids=None):
+    """Scrape matches for a gameweek — all of them, or just match_ids if given."""
+    matches = get_match_ids_for_gw(gw_number, season, match_ids=match_ids)
 
     if not matches:
-        print(f"No matches found for GW{gw_number} ({season}). Is the DB seeded?")
+        print(f"No matches found for GW{gw_number} ({season}) matching the given selection. Is the DB seeded?")
         return
 
     print(f"\n{'='*50}")
@@ -185,21 +192,25 @@ if __name__ == "__main__":
     parser.add_argument("--rescrape",action="store_true",        help="Re-scrape and overwrite existing data")
     parser.add_argument("--compare", action="store_true",        help="Compare against DB without saving")
     parser.add_argument("--delay",   type=int, default=4,        help="Seconds between matches (default: 4)")
+    parser.add_argument("--match_ids", type=str, default=None,
+                         help="Comma-separated match_ids to scrape instead of the whole gameweek, e.g. 1983546,1983548")
     args = parser.parse_args()
+
+    match_ids = [int(m) for m in args.match_ids.split(',')] if args.match_ids else None
 
     any_errors = False
 
     if args.gw_end:
         for gw in range(args.gw, args.gw_end + 1):
             r = scrape_gw(gw, rescrape=args.rescrape, compare=args.compare,
-                          delay=args.delay, season=args.season)
+                          delay=args.delay, season=args.season, match_ids=match_ids)
             if r and r["errors"]:
                 any_errors = True
             print(f"\nWaiting 10 seconds before next GW...")
             time.sleep(10)
     else:
         r = scrape_gw(args.gw, rescrape=args.rescrape, compare=args.compare,
-                      delay=args.delay, season=args.season)
+                      delay=args.delay, season=args.season, match_ids=match_ids)
         if r and r["errors"]:
             any_errors = True
 
