@@ -13,7 +13,7 @@ import argparse
 import sys
 import time
 import re
-from playwright.sync_api import sync_playwright
+from patchright.sync_api import sync_playwright
 from init_db import DB_PATH
 
 # ── Confirmed stat cell class names from WhoScored HTML inspection ─────────────
@@ -416,11 +416,13 @@ def scrape_match(match_id, headless=True):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
         try:
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                           "AppleWebKit/537.36 (KHTML, like Gecko) "
-                           "Chrome/120.0.0.0 Safari/537.36"
-            )
+            # No custom user_agent -- patchright's whole approach is to look
+            # like a real, unmodified Chrome install; overriding the UA (the
+            # old plain-playwright setup did, to at least pass as a normal
+            # desktop browser) reintroduces a mismatch between the UA string
+            # and the browser's real fingerprint, which is exactly the kind
+            # of inconsistency bot-detection looks for.
+            context = browser.new_context()
             page = context.new_page()
             page.route("**/*.{png,jpg,jpeg,gif,woff,woff2}", lambda route: route.abort())
 

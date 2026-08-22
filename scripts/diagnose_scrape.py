@@ -1,16 +1,21 @@
 """
-One-off diagnostic for the GW1 scrape failure: every match failed with
-"TAB LOAD FAILURES" across every tab (including summary, the default tab),
-for all 10 matches uniformly -- both symptoms point at the page never
-actually rendering real content, not a per-match issue. This script hits
-one match's live-stats page the same way scraper.py does and prints what's
-actually on the page, so we can tell a Cloudflare/bot-detection block
-(most likely for a cloud host's IP) apart from a genuine code bug.
+One-off diagnostic for the GW1 scrape failure. First run (with plain
+playwright) confirmed the cause: WhoScored's Cloudflare bot-protection
+serves Render's server IP a "Just a moment..." JS challenge (403) instead
+of the real page -- every match failed identically because the page never
+actually rendered, not because of a per-match issue.
 
-Run via the Render Shell:
+This version switches to patchright (a patched, harder-to-detect Playwright
+build -- see scraper.py's scrape_match() for the same change) to see
+whether that alone is enough to get past the challenge. Run via the Render
+Shell and check the "Signal check" section: if "cloudflare challenge" is
+still YES, patchright's headless-Chromium mode isn't enough on its own and
+we should look at the persistent-context/real-Chrome/Xvfb setup patchright
+recommends, or a residential proxy, instead.
+
     cd scripts && python3 diagnose_scrape.py
 """
-from playwright.sync_api import sync_playwright
+from patchright.sync_api import sync_playwright
 
 MATCH_ID = 1983546  # Arsenal vs Coventry -- confirmed complete (3-0) via a normal residential IP
 URL = f"https://www.whoscored.com/matches/{MATCH_ID}/livestatistics"
@@ -19,11 +24,8 @@ URL = f"https://www.whoscored.com/matches/{MATCH_ID}/livestatistics"
 def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page(
-            viewport={"width": 1600, "height": 1000},
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        )
+        # No custom user_agent -- see scraper.py's scrape_match() for why.
+        page = browser.new_page(viewport={"width": 1600, "height": 1000})
 
         print(f"Navigating to {URL} ...")
         resp = page.goto(URL, wait_until="domcontentloaded", timeout=30000)
