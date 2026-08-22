@@ -88,6 +88,27 @@
           {% endfor %}
         </select>
       </div>
+      <details open style="margin-bottom:10px">
+        <summary style="cursor:pointer;font-size:13px;color:var(--text-secondary)">First time doing this? Read the setup steps</summary>
+        <div class="pts-note" style="margin-top:8px">
+          <strong>One-time setup</strong> (only ever needed once per computer):
+          <pre style="white-space:pre-wrap;font-size:12px;background:var(--bg-card);padding:8px;border-radius:var(--radius-sm);margin:4px 0">git clone https://github.com/mcg1220/futbol-fantasia.git
+cd futbol-fantasia
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+pip install playwright
+playwright install chromium</pre>
+          <strong>Every time</strong> you open a new terminal window/tab, before running the command below —
+          this is the step people keep missing (running it from the wrong folder, like your home folder, gives
+          a "no such file or directory" error):
+          <pre style="white-space:pre-wrap;font-size:12px;background:var(--bg-card);padding:8px;border-radius:var(--radius-sm);margin:4px 0">cd futbol-fantasia
+source venv/bin/activate</pre>
+          Then run the generated command below. You can leave the same terminal tab open and just re-run it
+          again later with new match IDs — no need to repeat the steps above until you close that tab.
+        </div>
+      </details>
+
       <div style="display:flex;gap:8px">
         <input type="text" id="localScrapeCommand" readonly style="flex:1;font-family:monospace;font-size:12px" onclick="this.select()" />
         <button type="button" class="action-btn" onclick="copyLocalScrapeCommand()">📋 Copy</button>
