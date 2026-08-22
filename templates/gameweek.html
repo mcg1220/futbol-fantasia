@@ -36,14 +36,9 @@
     </div>
 
     <!-- Scrape button -->
-    <button class="scrape-btn" id="scrapeBtn" onclick="triggerScrape({{ gw }})">
+    <button class="scrape-btn" id="scrapeBtn" onclick="openScrapeModal()">
       🔄 Press the Button
     </button>
-  </div>
-  <div class="pts-note" id="scrapeSelectionNote" style="margin-top:6px">
-    <span id="scrapeSelectedCount"></span> selected — uncheck fixtures below to scrape only some.
-    <a href="#" onclick="setAllFixtureChecks(true); return false;">Select all</a> ·
-    <a href="#" onclick="setAllFixtureChecks(false); return false;">Select none</a>
   </div>
 </section>
 
@@ -51,6 +46,35 @@
 <div id="buttonFunOverlay" class="button-fun-overlay" style="display:none">
   <div id="confettiLayer" class="confetti-layer"></div>
   <img id="buttonFunGif" class="button-fun-gif" src="" alt="" />
+</div>
+
+<!-- ── Scrape match-selection modal ─────────────────────────────────────── -->
+<div id="scrapeSelectModal" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <h3>Which matches do you want to scrape?</h3>
+    <div class="pts-note" style="margin-bottom:10px">
+      <span id="scrapeSelectedCount"></span> selected —
+      <a href="#" onclick="setAllFixtureChecks(true); return false;">Select all</a> ·
+      <a href="#" onclick="setAllFixtureChecks(false); return false;">Select none</a>
+    </div>
+    <div style="max-height:320px;overflow-y:auto">
+      {% for group in day_groups %}
+        {% if group.label %}
+        <div class="gw-jump-label" style="margin-top:10px">{{ group.label }}</div>
+        {% endif %}
+        {% for f in group.matches %}
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0">
+          <input type="checkbox" class="fixture-scrape-check" value="{{ f.match_id }}" checked onchange="updateScrapeSelectionNote()" />
+          <span>{{ f.home_club }} vs {{ f.away_club }}{% if f.time %} — {{ f.time }}{% endif %}</span>
+        </label>
+        {% endfor %}
+      {% endfor %}
+    </div>
+    <div style="margin-top:14px;display:flex;gap:8px">
+      <button type="button" class="primary-btn" id="confirmScrapeBtn" onclick="confirmScrape({{ gw }})">🔄 Scrape Selected</button>
+      <button type="button" class="action-btn" onclick="closeScrapeModal()">Cancel</button>
+    </div>
+  </div>
 </div>
 
 <!-- ── Matchup Cards ─────────────────────────────────────────────────────── -->
@@ -74,12 +98,16 @@
           </div>
         </div>
         <span class="matchup-score">
-          {% if m.score_a is not none %}{{ "%.2f"|format(m.score_a) }}{% else %}—{% endif %}
+          {% if m.score_a is not none %}{{ "%.2f"|format(m.score_a) }}
+          {% elif m.live_score_a is not none %}{{ "%.2f"|format(m.live_score_a) }}
+          {% else %}—{% endif %}
         </span>
         {% if m.score_a is not none %}
           {% if m.win_a %}<span class="matchup-badge badge-win">W</span>
           {% elif m.loss_a %}<span class="matchup-badge badge-loss">L</span>
           {% else %}<span class="matchup-badge badge-tie">T</span>{% endif %}
+        {% elif m.live_score_a is not none %}
+          <span class="matchup-badge badge-tie" title="Live total from matches scraped so far — not final until the whole gameweek is scraped">LIVE</span>
         {% endif %}
       </div>
 
@@ -99,12 +127,16 @@
           </div>
         </div>
         <span class="matchup-score">
-          {% if m.score_b is not none %}{{ "%.2f"|format(m.score_b) }}{% else %}—{% endif %}
+          {% if m.score_b is not none %}{{ "%.2f"|format(m.score_b) }}
+          {% elif m.live_score_b is not none %}{{ "%.2f"|format(m.live_score_b) }}
+          {% else %}—{% endif %}
         </span>
         {% if m.score_b is not none %}
           {% if m.win_b %}<span class="matchup-badge badge-win">W</span>
           {% elif m.loss_b %}<span class="matchup-badge badge-loss">L</span>
           {% else %}<span class="matchup-badge badge-tie">T</span>{% endif %}
+        {% elif m.live_score_b is not none %}
+          <span class="matchup-badge badge-tie" title="Live total from matches scraped so far — not final until the whole gameweek is scraped">LIVE</span>
         {% endif %}
       </div>
 
@@ -120,7 +152,6 @@
     <table class="data-table fixtures-table">
       <thead>
         <tr>
-          <th style="text-align:center">Scrape</th>
           <th style="text-align:left">Home</th>
           <th></th>
           <th style="text-align:right">Away</th>
@@ -130,13 +161,10 @@
       <tbody>
         {% for group in day_groups %}
           {% if group.label %}
-          <tr class="fixture-day-row"><td colspan="5" class="fixture-day-label">{{ group.label }}</td></tr>
+          <tr class="fixture-day-row"><td colspan="4" class="fixture-day-label">{{ group.label }}</td></tr>
           {% endif %}
           {% for f in group.matches %}
           <tr>
-            <td style="text-align:center">
-              <input type="checkbox" class="fixture-scrape-check" value="{{ f.match_id }}" checked onchange="updateScrapeSelectionNote()" />
-            </td>
             <td class="fixture-team fixture-home">
               <span class="fixture-team-inner">
                 {% if badges.get(f.home_club) %}
@@ -214,15 +242,25 @@ function updateScrapeSelectionNote() {
   const selected = boxes.filter(cb => cb.checked).length;
   document.getElementById('scrapeSelectedCount').textContent = `${selected} of ${boxes.length} matches`;
 }
-updateScrapeSelectionNote();
 
-async function triggerScrape(gw) {
+function openScrapeModal() {
+  setAllFixtureChecks(true);
+  document.getElementById('scrapeSelectModal').style.display = 'flex';
+}
+
+function closeScrapeModal() {
+  document.getElementById('scrapeSelectModal').style.display = 'none';
+}
+
+async function confirmScrape(gw) {
   const boxes = getFixtureCheckboxes();
   const matchIds = boxes.filter(cb => cb.checked).map(cb => parseInt(cb.value, 10));
   if (boxes.length && matchIds.length === 0) {
     alert('Select at least one match to scrape.');
     return;
   }
+
+  closeScrapeModal();
 
   const btn = document.getElementById('scrapeBtn');
   btn.disabled = true;

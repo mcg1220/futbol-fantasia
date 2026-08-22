@@ -71,6 +71,12 @@ ALLOWED_MEME_EXTS   = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 sys.path.insert(0, SCRIPTS_DIR)
 from scoring_engine import calc_player_score, get_scoring_config, calc_bulk_season_totals, get_team_goals_conceded, calc_team_score_for_gw
 import world_cup_sim
+import scraper as scraper_lib
+# scraper.py's own save_to_db() assumes its module is run with cwd=scripts/
+# (see init_db.DB_PATH, a relative path) -- redirect it to the same
+# absolute DB_PATH this process already uses, so calling it directly from
+# here (not as a scripts/ subprocess) still writes to the right file.
+scraper_lib.DB_PATH = DB_PATH
 
 SEASON_CUTOFF = 1983000  # raw_stats has no season column; WhoScored match_ids below this are 2025-26
 
@@ -1314,6 +1320,24 @@ def gameweek(gw=None):
         WHERE mu.season = ? AND mu.gw_number = ?
         ORDER BY ma.name
     """, (season, gw)).fetchall()
+
+    # Official scores only exist once finalize_gw_results has run for the
+    # whole gw (every fixture scraped) -- until then, show a live/interim
+    # total computed straight from whatever raw_stats exist so far, clearly
+    # marked as not-yet-final (no win/loss/tie implied). Only bother once
+    # this gw actually has *some* scraped data -- otherwise every future,
+    # not-yet-played gw would show a noisy "LIVE 0.00" for every matchup.
+    matchups = [dict(m) for m in matchups]
+    gw_has_any_data = c.execute(
+        "SELECT 1 FROM raw_stats WHERE gw_number=? AND external=0 LIMIT 1", (gw,)
+    ).fetchone() is not None
+    for m in matchups:
+        m['live_score_a'] = m['live_score_b'] = None
+        if gw_has_any_data:
+            if m['score_a'] is None:
+                m['live_score_a'], _ = calc_team_score_for_gw(conn, m['team_a_id'], gw, season=season)
+            if m['score_b'] is None:
+                m['live_score_b'], _ = calc_team_score_for_gw(conn, m['team_b_id'], gw, season=season)
 
     fixture_rows = c.execute("""
         SELECT f.match_id, f.home_club, f.away_club, f.match_date, f.kickoff_time
@@ -4720,6 +4744,68 @@ def trigger_scrape():
     start_scrape(gw, trigger='manual', match_ids=match_ids)
 
     return jsonify({"status": "started", "gw": gw})
+
+
+REQUIRED_PLAYER_FIELDS = set(scraper_lib.empty_player("", "").keys())
+
+
+@app.route('/api/scrape/upload', methods=['POST'])
+def upload_scrape():
+    """
+    Lets a logged-in manager submit stats scraped on their own machine
+    (via scripts/scrape_and_upload.py) straight into the live DB, without
+    needing Render access -- a stopgap for whenever the hosted scraper
+    itself can't reach WhoScored (see scripts/diagnose_scrape.py).
+    Same login-required gate as every other write endpoint (see
+    require_login_for_writes) -- any logged-in manager can use this, same
+    as "Press the Button" isn't restricted to a specific manager either.
+
+    Reuses scraper.py's own save_to_db() (idempotent -- skips players
+    already saved for this match_id) so this writes through the exact same
+    path as a normal server-side scrape.
+    """
+    data = request.get_json(silent=True) or {}
+
+    try:
+        match_id = int(data.get('match_id'))
+        gw_number = int(data.get('gw'))
+        goals_home = int(data.get('goals_home'))
+        goals_away = int(data.get('goals_away'))
+    except (TypeError, ValueError):
+        return jsonify({"error": "match_id, gw, goals_home, goals_away must all be integers"}), 400
+
+    home_team = (data.get('home_team') or '').strip()
+    away_team = (data.get('away_team') or '').strip()
+    if not home_team or not away_team:
+        return jsonify({"error": "home_team and away_team are required"}), 400
+
+    players = data.get('players')
+    if not isinstance(players, list) or not players:
+        return jsonify({"error": "players must be a non-empty list"}), 400
+    for p in players:
+        if not isinstance(p, dict) or not REQUIRED_PLAYER_FIELDS.issubset(p.keys()):
+            missing = REQUIRED_PLAYER_FIELDS - set(p.keys() if isinstance(p, dict) else [])
+            return jsonify({"error": f"player entry missing field(s): {sorted(missing)}"}), 400
+
+    conn = get_db()
+    before = conn.execute("SELECT COUNT(*) FROM raw_stats WHERE match_id=?", (match_id,)).fetchone()[0]
+    conn.close()
+
+    scraper_lib.save_to_db(players, match_id, gw_number, home_team, away_team, goals_home, goals_away)
+
+    conn = get_db()
+    after = conn.execute("SELECT COUNT(*) FROM raw_stats WHERE match_id=?", (match_id,)).fetchone()[0]
+    log_audit(conn, current_manager_id(), 'scraper', 'manual_upload',
+              f"Uploaded {after - before} new player row(s) for match {match_id} (GW{gw_number}, "
+              f"{home_team} {goals_home}-{goals_away} {away_team}) from a local scrape.",
+              {"match_id": match_id, "gw": gw_number, "players_submitted": len(players), "rows_inserted": after - before})
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        "status": "ok", "match_id": match_id, "gw": gw_number,
+        "players_submitted": len(players), "rows_inserted": after - before,
+    })
 
 
 @app.route('/api/scrape/status')
