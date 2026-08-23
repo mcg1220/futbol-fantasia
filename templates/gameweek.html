@@ -103,9 +103,11 @@ playwright install chromium</pre>
           this is the step people keep missing (running it from the wrong folder, like your home folder, gives
           a "no such file or directory" error):
           <pre style="white-space:pre-wrap;font-size:12px;background:var(--bg-card);padding:8px;border-radius:var(--radius-sm);margin:4px 0">cd futbol-fantasia
-source venv/bin/activate</pre>
+source venv/bin/activate
+cd scripts</pre>
           Then run the generated command below. You can leave the same terminal tab open and just re-run it
-          again later with new match IDs — no need to repeat the steps above until you close that tab.
+          again later with new match IDs, as many times as you want — no need to repeat the steps above until
+          you close that tab.
         </div>
       </details>
 
@@ -291,7 +293,7 @@ function updateLocalScrapeCommand(gw) {
   const matchIds = getFixtureCheckboxes().filter(cb => cb.checked).map(cb => cb.value).join(',');
   const managerId = document.getElementById('localScrapeManagerId').value || '<your_manager_id>';
   const cmd = matchIds
-    ? `cd scripts && python3 scrape_and_upload.py --match_id ${matchIds} --gw ${gw} --manager_id ${managerId}`
+    ? `python3 scrape_and_upload.py --match_id ${matchIds} --gw ${gw} --manager_id ${managerId}`
     : '';
   document.getElementById('localScrapeCommand').value = cmd;
 }
