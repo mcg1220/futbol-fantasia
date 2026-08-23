@@ -341,7 +341,18 @@ tr:nth-child(3) .rank-num, tr:nth-child(4) .rank-num { color: var(--pl-magenta);
 .badge-win  { background: var(--pl-green);  color: #fff; }
 .badge-loss { background: var(--red-loss);  color: #fff; }
 .badge-tie  { background: var(--tie-color); color: #fff; }
+.badge-live { background: #FF2D2D; color: #fff; animation: badge-live-pulse 1.6s ease-in-out infinite; }
 [data-theme="dark"] .badge-win { color: #18181B; }
+[data-theme="dark"] .badge-live { background: #FF5C5C; }
+
+@keyframes badge-live-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .badge-live { animation: none; }
+}
 
 .cell-pts { font-size: 12px; font-weight: 500; color: var(--text-secondary); }
 
@@ -481,7 +492,15 @@ tr:nth-child(3) .rank-num, tr:nth-child(4) .rank-num { color: var(--pl-magenta);
   gap: 4px;
   text-align: center;
   transition: background 0.15s;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
 }
+
+.matchup-side:hover { background: var(--bg-row-alt); }
+.side-win:hover  { background: var(--pl-green-bg);  }
+.side-loss:hover { background: var(--red-bg);       }
+.side-tie:hover  { background: var(--tie-bg);       }
 
 .side-win  { background: var(--pl-green-bg);  }
 .side-loss { background: var(--red-bg);       }

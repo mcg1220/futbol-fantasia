@@ -126,7 +126,7 @@ source venv/bin/activate</pre>
     <div class="matchup-card">
 
       <!-- Team A -->
-      <div class="matchup-side {% if m.score_a is not none and m.score_b is not none %}{% if m.win_a %}side-win{% elif m.loss_a %}side-loss{% else %}side-tie{% endif %}{% endif %}">
+      <a href="/team/{{ m.team_a_id }}" class="matchup-side {% if m.score_a is not none and m.score_b is not none %}{% if m.win_a %}side-win{% elif m.loss_a %}side-loss{% else %}side-tie{% endif %}{% endif %}">
         <div class="matchup-identity">
           {% if m.team_a_photo %}
           <img src="{{ url_for('static', filename=m.team_a_photo) }}" class="team-avatar team-avatar-md" />
@@ -148,14 +148,14 @@ source venv/bin/activate</pre>
           {% elif m.loss_a %}<span class="matchup-badge badge-loss">L</span>
           {% else %}<span class="matchup-badge badge-tie">T</span>{% endif %}
         {% elif m.live_score_a is not none %}
-          <span class="matchup-badge badge-tie" title="Live total from matches scraped so far — not final until the whole gameweek is scraped">LIVE</span>
+          <span class="matchup-badge badge-live" title="Live total from matches scraped so far — not final until the whole gameweek is scraped">LIVE</span>
         {% endif %}
-      </div>
+      </a>
 
       <div class="matchup-vs">VS</div>
 
       <!-- Team B -->
-      <div class="matchup-side {% if m.score_a is not none and m.score_b is not none %}{% if m.win_b %}side-win{% elif m.loss_b %}side-loss{% else %}side-tie{% endif %}{% endif %}">
+      <a href="/team/{{ m.team_b_id }}" class="matchup-side {% if m.score_a is not none and m.score_b is not none %}{% if m.win_b %}side-win{% elif m.loss_b %}side-loss{% else %}side-tie{% endif %}{% endif %}">
         <div class="matchup-identity">
           {% if m.team_b_photo %}
           <img src="{{ url_for('static', filename=m.team_b_photo) }}" class="team-avatar team-avatar-md" />
@@ -177,9 +177,9 @@ source venv/bin/activate</pre>
           {% elif m.loss_b %}<span class="matchup-badge badge-loss">L</span>
           {% else %}<span class="matchup-badge badge-tie">T</span>{% endif %}
         {% elif m.live_score_b is not none %}
-          <span class="matchup-badge badge-tie" title="Live total from matches scraped so far — not final until the whole gameweek is scraped">LIVE</span>
+          <span class="matchup-badge badge-live" title="Live total from matches scraped so far — not final until the whole gameweek is scraped">LIVE</span>
         {% endif %}
-      </div>
+      </a>
 
     </div>
     {% endfor %}

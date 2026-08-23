@@ -47,9 +47,20 @@
     <div class="team-matchup-badge {% if matchup.my_win %}matchup-win{% elif matchup.my_loss %}matchup-loss{% elif matchup.my_tie %}matchup-tie{% endif %}">
       <div class="matchup-badge-label">GW{{ current_gw }} Matchup</div>
       <div class="matchup-badge-scores">
-        <span class="matchup-badge-my">{{ "%.2f"|format(matchup.my_score) if matchup.my_score is not none else "—" }}</span>
+        <span class="matchup-badge-my">
+          {% if matchup.my_score is not none %}{{ "%.2f"|format(matchup.my_score) }}
+          {% elif matchup.live_my_score is not none %}{{ "%.2f"|format(matchup.live_my_score) }}
+          {% else %}—{% endif %}
+        </span>
         <span class="matchup-badge-sep">vs</span>
-        <span class="matchup-badge-opp">{{ "%.2f"|format(matchup.opp_score) if matchup.opp_score is not none else "—" }}</span>
+        <span class="matchup-badge-opp">
+          {% if matchup.opp_score is not none %}{{ "%.2f"|format(matchup.opp_score) }}
+          {% elif matchup.live_opp_score is not none %}{{ "%.2f"|format(matchup.live_opp_score) }}
+          {% else %}—{% endif %}
+        </span>
+        {% if matchup.my_score is none and (matchup.live_my_score is not none or matchup.live_opp_score is not none) %}
+        <span class="matchup-badge badge-live" title="Live total from matches scraped so far — not final until the whole gameweek is scraped">LIVE</span>
+        {% endif %}
       </div>
       <a href="/team/{{ matchup.opp_id }}" class="matchup-badge-opp-name">{{ matchup.opp_name }} · {{ matchup.opp_team }}</a>
     </div>

@@ -1429,6 +1429,22 @@ def team(manager_id):
     """, (manager_id,)*3 + (manager_id, manager_id, season, current_gw,
                              manager_id, manager_id)).fetchone()
 
+    # Official scores only exist once finalize_gw_results has run for the
+    # whole gw -- until then, show a live/interim total the same way the
+    # Gameweek page's matchup cards already do, once this gw has any
+    # scraped data at all (avoids a noisy "LIVE 0.00" on an unplayed gw).
+    if matchup:
+        matchup = dict(matchup)
+        matchup['live_my_score'] = matchup['live_opp_score'] = None
+        gw_has_any_data = c.execute(
+            "SELECT 1 FROM raw_stats WHERE gw_number=? AND external=0 LIMIT 1", (current_gw,)
+        ).fetchone() is not None
+        if gw_has_any_data:
+            if matchup['my_score'] is None:
+                matchup['live_my_score'], _ = calc_team_score_for_gw(conn, manager_id, current_gw, season=season)
+            if matchup['opp_score'] is None:
+                matchup['live_opp_score'], _ = calc_team_score_for_gw(conn, matchup['opp_id'], current_gw, season=season)
+
     # ── Head-to-Head: full-season schedule vs. every opponent ──────────────
     # matchups already holds the complete pre-generated 33-GW schedule (see
     # scripts/generate_schedule.py), so this is a pure read -- no
@@ -1538,7 +1554,11 @@ def team(manager_id):
     points_map = {}
     for player in roster_rows:
         name  = player['player_name']
-        pos   = (player['position_slot'] or 'MID').upper()
+        # Real position, not the roster slot label -- for bench/ir rows
+        # position_slot is literally the string 'bench'/'ir', which would
+        # silently zero out every position-gated stat in calc_player_score
+        # (see get_roster_at_gw's docstring for the same fix applied there).
+        pos   = (player['position'] or 'MID').upper()
         club  = club_map.get(name)
         matches = club_matches.get(club, []) if club else []
 
