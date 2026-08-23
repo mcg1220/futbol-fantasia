@@ -1554,11 +1554,7 @@ def team(manager_id):
     points_map = {}
     for player in roster_rows:
         name  = player['player_name']
-        # Real position, not the roster slot label -- for bench/ir rows
-        # position_slot is literally the string 'bench'/'ir', which would
-        # silently zero out every position-gated stat in calc_player_score
-        # (see get_roster_at_gw's docstring for the same fix applied there).
-        pos   = (player['position'] or 'MID').upper()
+        pos   = resolve_scoring_position(player['position_slot'], player['position'])
         club  = club_map.get(name)
         matches = club_matches.get(club, []) if club else []
 
@@ -1800,19 +1796,36 @@ def team(manager_id):
     )
 
 
+VALID_SCORING_POSITIONS = {'FW', 'MID', 'DEF', 'GK'}
+
+
+def resolve_scoring_position(position_slot, real_position):
+    """The position to score a player at for a given gw. Uses the slot they
+    were actually started in when it's a real position code -- a real-life
+    DEF started at MID this week scores as MID (no clean sheet / goals-
+    conceded credit for a slot they aren't playing) -- falling back to
+    their real, static position only when position_slot isn't a position
+    at all (bench/ir rows store the literal string 'bench'/'ir' there)."""
+    slot = (position_slot or '').upper()
+    if slot in VALID_SCORING_POSITIONS:
+        return slot
+    return (real_position or 'MID').upper()
+
+
 def get_roster_at_gw(conn, manager_id, gw, season, scoring_season=None):
     """
-    Full roster (all slot types) as it stood at gw, with each player's real
+    Full roster (all slot types) as it stood at gw, with each player's
     scoring position and their score for that gw. Shared by the historical
     lineup view and the standings top-scorer section -- both need "who was
     on this manager's roster at gw N and what did they score," they just do
     different things with the result.
 
-    Deliberately looks up each player's real position from `players.position`
-    rather than using the roster row's `position_slot` -- for bench/ir rows
-    `position_slot` is literally the string 'bench'/'ir', not a real
-    position, so passing it straight into calc_player_score() would silently
-    zero out every position-gated stat except minutes.
+    Scoring position is resolved via resolve_scoring_position() -- the
+    slot they were actually started in when it's a real position (so a
+    real-life DEF started at MID doesn't get clean-sheet credit for a slot
+    they aren't playing), falling back to their real, static position only
+    for bench/ir rows (where position_slot is literally the string
+    'bench'/'ir', not a position at all).
     """
     c = conn.cursor()
     if scoring_season is None:
@@ -1833,7 +1846,7 @@ def get_roster_at_gw(conn, manager_id, gw, season, scoring_season=None):
     results = []
     for row in roster_rows:
         name = row['player_name']
-        real_position = (row['position'] or 'MID').upper()
+        scoring_position = resolve_scoring_position(row['position_slot'], row['position'])
 
         match_rows = c.execute(
             "SELECT match_id FROM raw_stats WHERE player_name=? AND gw_number=?",
@@ -1842,14 +1855,14 @@ def get_roster_at_gw(conn, manager_id, gw, season, scoring_season=None):
 
         gw_score = 0.0
         for m in match_rows:
-            score, _ = calc_player_score(conn, name, m['match_id'], real_position, season=scoring_season)
+            score, _ = calc_player_score(conn, name, m['match_id'], scoring_position, season=scoring_season)
             gw_score += score
 
         results.append({
             'player_name': name,
             'slot_type': row['slot_type'],
             'position_slot': row['position_slot'],
-            'real_position': real_position,
+            'real_position': scoring_position,
             'club': row['club'],
             'gw_score': round(gw_score, 2),
         })
