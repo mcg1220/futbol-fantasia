@@ -4806,9 +4806,12 @@ def upload_scrape():
     require_login_for_writes) -- any logged-in manager can use this, same
     as "Press the Button" isn't restricted to a specific manager either.
 
-    Reuses scraper.py's own save_to_db() (idempotent -- skips players
-    already saved for this match_id) so this writes through the exact same
-    path as a normal server-side scrape.
+    Reuses scraper.py's own save_to_db() -- by default idempotent (skips
+    players already saved for this match_id), same as a normal server-side
+    scrape. Pass "rescrape": true to instead delete and replace that
+    match's existing rows -- needed when an earlier scrape (e.g. someone
+    running this mid-match) already wrote incomplete/stale stats that a
+    later, complete scrape would otherwise silently skip forever.
     """
     data = request.get_json(silent=True) or {}
 
@@ -4819,6 +4822,8 @@ def upload_scrape():
         goals_away = int(data.get('goals_away'))
     except (TypeError, ValueError):
         return jsonify({"error": "match_id, gw, goals_home, goals_away must all be integers"}), 400
+
+    rescrape = bool(data.get('rescrape'))
 
     home_team = (data.get('home_team') or '').strip()
     away_team = (data.get('away_team') or '').strip()
@@ -4837,20 +4842,23 @@ def upload_scrape():
     before = conn.execute("SELECT COUNT(*) FROM raw_stats WHERE match_id=?", (match_id,)).fetchone()[0]
     conn.close()
 
-    scraper_lib.save_to_db(players, match_id, gw_number, home_team, away_team, goals_home, goals_away)
+    scraper_lib.save_to_db(players, match_id, gw_number, home_team, away_team, goals_home, goals_away, rescrape=rescrape)
 
     conn = get_db()
     after = conn.execute("SELECT COUNT(*) FROM raw_stats WHERE match_id=?", (match_id,)).fetchone()[0]
-    log_audit(conn, current_manager_id(), 'scraper', 'manual_upload',
-              f"Uploaded {after - before} new player row(s) for match {match_id} (GW{gw_number}, "
+    action = 'manual_rescrape' if rescrape else 'manual_upload'
+    verb = 'Replaced' if rescrape else 'Uploaded'
+    log_audit(conn, current_manager_id(), 'scraper', action,
+              f"{verb} {after} player row(s) for match {match_id} (GW{gw_number}, "
               f"{home_team} {goals_home}-{goals_away} {away_team}) from a local scrape.",
-              {"match_id": match_id, "gw": gw_number, "players_submitted": len(players), "rows_inserted": after - before})
+              {"match_id": match_id, "gw": gw_number, "players_submitted": len(players),
+               "rows_inserted": after - before, "rescrape": rescrape})
     conn.commit()
     conn.close()
 
     return jsonify({
         "status": "ok", "match_id": match_id, "gw": gw_number,
-        "players_submitted": len(players), "rows_inserted": after - before,
+        "players_submitted": len(players), "rows_inserted": after - before, "rescrape": rescrape,
     })
 
 

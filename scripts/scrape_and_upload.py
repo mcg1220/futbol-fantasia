@@ -13,13 +13,17 @@ scrape_saves, etc.), just not its browser-launch step.
 You need your own manager login (same one you use on the site) -- nobody
 needs Render access for this. The site's /api/scrape/upload endpoint
 accepts any logged-in manager's submission and writes it through the same
-save_to_db() path a normal server-side scrape would use (idempotent --
-safe to re-run, it skips players already saved for that match).
+save_to_db() path a normal server-side scrape would use. By default this
+is idempotent -- safe to re-run, it skips players already saved for that
+match -- which means re-running it will NOT fix a match that was scraped
+too early (e.g. mid-match) and left incomplete/stale stats; pass
+--rescrape to delete and replace that match's stats instead.
 
 Usage:
     python3 scrape_and_upload.py --match_id 1983547 --gw 1 --manager_id 2
     python3 scrape_and_upload.py --match_id 1983547,1983548,1983549 --gw 1 --manager_id 2
     python3 scrape_and_upload.py --match_id 1983547 --gw 1 --manager_id 2 --site http://localhost:5050
+    python3 scrape_and_upload.py --match_id 1983547 --gw 1 --manager_id 2 --rescrape
 
 --match_id accepts a comma-separated list to do several matches in one
 run (one login, one at a time). You'll be prompted for your PIN (not
@@ -133,13 +137,13 @@ def clean_players_for_upload(players):
     return [{k: p[k] for k in UPLOAD_PLAYER_FIELDS if k in p} for p in players]
 
 
-def upload(opener, site, match_id, gw, home_team, away_team, goals_home, goals_away, players):
+def upload(opener, site, match_id, gw, home_team, away_team, goals_home, goals_away, players, rescrape=False):
     players = clean_players_for_upload(players)
     payload = {
         "match_id": match_id, "gw": gw,
         "home_team": home_team, "away_team": away_team,
         "goals_home": goals_home, "goals_away": goals_away,
-        "players": players,
+        "players": players, "rescrape": rescrape,
     }
     req = urllib.request.Request(
         f"{site}/api/scrape/upload", method="POST",
@@ -161,6 +165,10 @@ def main():
     ap.add_argument("--gw", type=int, required=True)
     ap.add_argument("--manager_id", type=int, required=True, help="Your manager id (same as the login dropdown)")
     ap.add_argument("--site", type=str, default=DEFAULT_SITE)
+    ap.add_argument("--rescrape", action="store_true",
+                     help="Delete and replace this match's existing stats instead of skipping "
+                          "players already saved -- use this if an earlier scrape (e.g. mid-match) "
+                          "left stale/incomplete data that a normal re-run won't overwrite")
     args = ap.parse_args()
 
     match_ids = [int(m) for m in str(args.match_id).split(',') if m.strip()]
@@ -185,7 +193,7 @@ def main():
                 continue
             print(f"  Uploading to {args.site}...")
             result = upload(opener, args.site, match_id, args.gw, home_team, away_team,
-                             goals_home, goals_away, players)
+                             goals_home, goals_away, players, rescrape=args.rescrape)
             print(f"  Done: {result}")
             succeeded.append(match_id)
         except Exception as e:
