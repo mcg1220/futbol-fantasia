@@ -28,6 +28,20 @@ no candidate at all (genuinely never added to the player pool -- a
 different problem, not a spelling mismatch) are reported but never
 auto-applied; those need a human to look at them.
 
+Not every mismatch is about accents, though -- e.g. WhoScored rendering
+"Josh King" while the pool has "Joshua King" is a nickname mismatch, not a
+diacritic one, so accent-stripping can't find it automatically. MANUAL_PAIRS
+below is a small human-curated list of exactly these non-accent cases,
+found by spot-checking a player's stats when someone reports them missing.
+They're applied with the same rename-everywhere logic and the same safety
+checks (skipped if already fixed, or if renaming would collide) -- add to
+this list as new non-accent mismatches turn up.
+
+Since new matches keep getting scraped throughout a gameweek (and beyond,
+via manual re-scrapes), re-running this script periodically -- not just
+once -- is expected and safe; it only ever acts on names that still need
+fixing.
+
     python3 fix_accent_mismatches.py            # dry run: report only
     python3 fix_accent_mismatches.py --apply    # write the confident pairs
 """
@@ -55,6 +69,12 @@ TARGETS = [
     ("transactions", "dropped_player"),
     ("waiver_claims", "add_player"),
     ("waiver_claims", "drop_player"),
+]
+
+# Non-accent mismatches (nicknames, etc.) found by hand -- see module
+# docstring. (wrong_name_in_raw_stats, canonical_name_in_players)
+MANUAL_PAIRS = [
+    ("Josh King", "Joshua King"),
 ]
 
 
@@ -96,13 +116,43 @@ def find_pairs(conn):
         else:
             unmatched.append(orphan)
 
+    # Fold in the manually-curated non-accent pairs, skipping any that are
+    # already fixed (wrong_name no longer appears anywhere) or that would
+    # collide with an existing canonical row -- keeps re-runs a no-op.
+    canonical_set_now = set(canonical_names)
+    for wrong_name, canonical_name in MANUAL_PAIRS:
+        still_present = any(
+            conn.execute(f"SELECT 1 FROM {table} WHERE {col}=? LIMIT 1", (wrong_name,)).fetchone()
+            for table, col in TARGETS
+        )
+        if not still_present:
+            continue
+        if canonical_name not in canonical_set_now:
+            unmatched.append(wrong_name)
+            continue
+        confident_pairs.append((wrong_name, canonical_name))
+
     return confident_pairs, ambiguous, unmatched
 
 
-def rename_everywhere(conn, wrong_name, canonical_name):
+def find_duplicate_player_ids(conn, wrong_name, canonical_name):
+    """(wrong_id, canonical_id) if both names already exist as SEPARATE
+    players.id rows -- a genuine duplicate player record (e.g. the scraper
+    auto-creating a stub the first time it saw someone under a name that
+    didn't match the existing pool entry), not a simple rename. None if
+    there's no such collision."""
+    wrong_row = conn.execute("SELECT id FROM players WHERE name=?", (wrong_name,)).fetchone()
+    canonical_row = conn.execute("SELECT id FROM players WHERE name=?", (canonical_name,)).fetchone()
+    if wrong_row and canonical_row and wrong_row['id'] != canonical_row['id']:
+        return wrong_row['id'], canonical_row['id']
+    return None
+
+
+def rename_everywhere(conn, wrong_name, canonical_name, skip_players_table=False):
     total = 0
     touched = []
-    for table, col in TARGETS:
+    targets = [(t, c) for t, c in TARGETS if not (skip_players_table and t == 'players')]
+    for table, col in targets:
         count = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE {col}=?", (wrong_name,)).fetchone()[0]
         if count:
             touched.append((table, col, count))
@@ -110,6 +160,25 @@ def rename_everywhere(conn, wrong_name, canonical_name):
     for table, col, _ in touched:
         conn.execute(f"UPDATE {table} SET {col}=? WHERE {col}=?", (canonical_name, wrong_name))
     return total, touched
+
+
+def merge_duplicate_player(conn, wrong_id, canonical_id):
+    """Handles the duplicate-player-record case, called AFTER
+    rename_everywhere(..., skip_players_table=True) has already redirected
+    every name-string reference from wrong_name to canonical_name. Safe to
+    always delete the stub players/eligibility rows at that point: the
+    schema has exactly one FK to players.id (player_eligibility), and
+    every other table references a player by name string, not id -- so
+    once the strings are migrated, the stub row has nothing left pointing
+    to it. Migrates the stub's whoscored_id onto the canonical row first,
+    if the canonical row doesn't already have one."""
+    stub = conn.execute("SELECT whoscored_id FROM players WHERE id=?", (wrong_id,)).fetchone()
+    canonical = conn.execute("SELECT whoscored_id FROM players WHERE id=?", (canonical_id,)).fetchone()
+    if stub['whoscored_id'] is not None and canonical['whoscored_id'] is None:
+        conn.execute("UPDATE players SET whoscored_id=? WHERE id=?", (stub['whoscored_id'], canonical_id))
+
+    conn.execute("DELETE FROM player_eligibility WHERE player_id=?", (wrong_id,))
+    conn.execute("DELETE FROM players WHERE id=?", (wrong_id,))
 
 
 def main():
@@ -127,9 +196,13 @@ def main():
         return
 
     if confident_pairs:
-        print(f"Confident pairs found ({len(confident_pairs)}) — will rename un-accented -> accented:")
+        print(f"Confident pairs found ({len(confident_pairs)}):")
         for wrong, canonical in confident_pairs:
-            print(f"  {wrong!r} -> {canonical!r}")
+            dup = find_duplicate_player_ids(conn, wrong, canonical)
+            if dup:
+                print(f"  {wrong!r} -> {canonical!r}  (DUPLICATE PLAYER RECORDS -- will merge, not just rename)")
+            else:
+                print(f"  {wrong!r} -> {canonical!r}")
     if ambiguous:
         print(f"\nAMBIGUOUS — more than one un-accented candidate, skipped (needs a human):")
         for orphan, candidates in ambiguous:
@@ -151,10 +224,20 @@ def main():
 
     grand_total = 0
     for wrong, canonical in confident_pairs:
-        total, touched = rename_everywhere(conn, wrong, canonical)
-        grand_total += total
-        detail = ', '.join(f"{t}.{c}={n}" for t, c, n in touched)
-        print(f"  Renamed {wrong!r} -> {canonical!r}: {total} row(s) ({detail})")
+        dup = find_duplicate_player_ids(conn, wrong, canonical)
+        if dup:
+            wrong_id, canonical_id = dup
+            total, touched = rename_everywhere(conn, wrong, canonical, skip_players_table=True)
+            merge_duplicate_player(conn, wrong_id, canonical_id)
+            grand_total += total
+            detail = ', '.join(f"{t}.{c}={n}" for t, c, n in touched) or "no other tables referenced it"
+            print(f"  Merged {wrong!r} (id={wrong_id}) into {canonical!r} (id={canonical_id}): "
+                  f"{total} row(s) renamed ({detail}), stub player record removed")
+        else:
+            total, touched = rename_everywhere(conn, wrong, canonical)
+            grand_total += total
+            detail = ', '.join(f"{t}.{c}={n}" for t, c, n in touched)
+            print(f"  Renamed {wrong!r} -> {canonical!r}: {total} row(s) ({detail})")
     conn.commit()
     print(f"\nApplied — {grand_total} row(s) renamed across {len(confident_pairs)} player(s).")
     conn.close()
