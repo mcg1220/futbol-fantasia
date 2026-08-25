@@ -363,6 +363,21 @@ def is_player_locked(conn, season, gw_number, club):
     return kickoff is not None and now_eastern_naive() >= kickoff
 
 
+def get_player_lock_state(conn, season, gw_number, club):
+    """'not_locked' | 'in_progress' | 'finished', based on this club's own
+    kickoff -- distinct from is_player_locked's plain boolean so the UI can
+    show "match still being played" separately from "match already over"
+    instead of one identical 🔒 for both. The 2-hour assumed match length
+    is a rough estimate (extra time/stoppages aren't accounted for), same
+    spirit as is_gw_locked's 6-hour-after-last-kickoff gw-wide freeze."""
+    kickoff = get_player_kickoff(conn, season, gw_number, club)
+    if kickoff is None or now_eastern_naive() < kickoff:
+        return 'not_locked'
+    if now_eastern_naive() < kickoff + timedelta(hours=2):
+        return 'in_progress'
+    return 'finished'
+
+
 def is_gw_locked(conn, season, gw_number):
     """True 6h after the gw's last kickoff — the whole gameweek is frozen,
     nothing about it (starters, bench, IR) changes again."""
@@ -1411,6 +1426,7 @@ def team(manager_id):
 
     matchup = c.execute("""
         SELECT
+            mu.id AS matchup_id,
             CASE WHEN mu.team_a_id=? THEN mb.name      ELSE ma.name      END AS opp_name,
             CASE WHEN mu.team_a_id=? THEN mb.team_name ELSE ma.team_name END AS opp_team,
             CASE WHEN mu.team_a_id=? THEN mb.id        ELSE ma.id        END AS opp_id,
@@ -1652,6 +1668,17 @@ def team(manager_id):
         r['player_name']: is_player_locked(conn, season, current_gw, club_map.get(r['player_name']))
         for r in roster_rows
     }
+    lock_state_map = {
+        r['player_name']: get_player_lock_state(conn, season, current_gw, club_map.get(r['player_name']))
+        for r in roster_rows
+    }
+    start_status_map = {
+        r['player_name']: r['status']
+        for r in c.execute(
+            "SELECT player_name, status FROM player_start_status WHERE gw=? AND season=?",
+            (current_gw, season)
+        ).fetchall()
+    }
 
     # ── Plan Future Lineup: pre-set a later, not-yet-locked gw's lineup ────
     all_gws = [r[0] for r in c.execute(
@@ -1773,6 +1800,8 @@ def team(manager_id):
         ir_check=ir_check,
         gw_locked=gw_locked,
         locked_map=locked_map,
+        lock_state_map=lock_state_map,
+        start_status_map=start_status_map,
         future_gws=future_gws,
         plan_gw=plan_gw,
         plan_starters=plan_starters,
@@ -1848,10 +1877,19 @@ def get_roster_at_gw(conn, manager_id, gw, season, scoring_season=None):
         name = row['player_name']
         scoring_position = resolve_scoring_position(row['position_slot'], row['position'])
 
-        match_rows = c.execute(
-            "SELECT match_id FROM raw_stats WHERE player_name=? AND gw_number=?",
-            (name, gw)
-        ).fetchall()
+        # raw_stats has no season column -- gw_number alone is ambiguous
+        # between seasons (e.g. both 2025-26 and 2026-27 have a GW1), so
+        # this must resolve match_id through fixtures/gameweeks (which are
+        # season-scoped) rather than matching raw_stats.gw_number directly,
+        # or it would silently sum stats from the wrong season's same-
+        # numbered gw too. Matches the scoping calc_team_score_for_gw and
+        # team()'s points_map already use.
+        match_rows = c.execute("""
+            SELECT rs.match_id FROM raw_stats rs
+            JOIN fixtures f ON f.match_id = rs.match_id
+            JOIN gameweeks g ON g.id = f.gw_id
+            WHERE rs.player_name=? AND g.gw_number=? AND f.season=?
+        """, (name, gw, season)).fetchall()
 
         gw_score = 0.0
         for m in match_rows:
@@ -1868,6 +1906,87 @@ def get_roster_at_gw(conn, manager_id, gw, season, scoring_season=None):
         })
 
     return results
+
+
+@app.route('/matchup/<int:matchup_id>')
+def matchup_detail(matchup_id):
+    """Head-to-head matchup detail: both rosters side by side, starters
+    position-aligned (ESPN-Fantasy-style), bench listed below. Reuses
+    get_roster_at_gw() for each side -- already returns the right scoring
+    position per player (the slot they were actually started in, thanks to
+    resolve_scoring_position), which is exactly what's needed to group
+    starters by fantasy position here too."""
+    conn = get_db()
+    c = conn.cursor()
+    season = DRAFT_SEASON
+    badges = load_badges()
+
+    mu = c.execute("""
+        SELECT mu.id, mu.gw_number, mu.team_a_id, mu.team_b_id,
+               ma.name AS a_name, ma.team_name AS a_team, ma.photo_path AS a_photo,
+               mb.name AS b_name, mb.team_name AS b_team, mb.photo_path AS b_photo,
+               ra.fantasy_score AS a_score, ra.win AS a_win, ra.loss AS a_loss, ra.tie AS a_tie,
+               rb.fantasy_score AS b_score, rb.win AS b_win, rb.loss AS b_loss, rb.tie AS b_tie
+        FROM matchups mu
+        JOIN managers ma ON ma.id = mu.team_a_id
+        JOIN managers mb ON mb.id = mu.team_b_id
+        LEFT JOIN results ra ON ra.matchup_id = mu.id AND ra.manager_id = mu.team_a_id
+        LEFT JOIN results rb ON rb.matchup_id = mu.id AND rb.manager_id = mu.team_b_id
+        WHERE mu.id=?
+    """, (matchup_id,)).fetchone()
+    if not mu:
+        conn.close()
+        return "Matchup not found", 404
+
+    gw = mu['gw_number']
+
+    live_score_a = live_score_b = None
+    gw_has_any_data = c.execute(
+        "SELECT 1 FROM raw_stats WHERE gw_number=? AND external=0 LIMIT 1", (gw,)
+    ).fetchone() is not None
+    if gw_has_any_data:
+        if mu['a_score'] is None:
+            live_score_a, _ = calc_team_score_for_gw(conn, mu['team_a_id'], gw, season=season)
+        if mu['b_score'] is None:
+            live_score_b, _ = calc_team_score_for_gw(conn, mu['team_b_id'], gw, season=season)
+
+    def build_side(manager_id):
+        roster = get_roster_at_gw(conn, manager_id, gw, season)
+        return {
+            'starters': [r for r in roster if r['slot_type'] == 'starter'],
+            'bench': [r for r in roster if r['slot_type'] == 'bench'],
+            'ir': [r for r in roster if r['slot_type'] == 'ir'],
+        }
+
+    side_a = build_side(mu['team_a_id'])
+    side_b = build_side(mu['team_b_id'])
+
+    # One row per fantasy starting slot (2 FW, 4 MID, 4 DEF, 1 GK), pairing
+    # both teams' Nth player at that position -- blank if a side is short.
+    paired_starters = []
+    for pos, target in POSITION_TARGETS.items():
+        a_group = [r for r in side_a['starters'] if r['real_position'] == pos]
+        b_group = [r for r in side_b['starters'] if r['real_position'] == pos]
+        for i in range(target):
+            paired_starters.append({
+                'pos': pos,
+                'a': a_group[i] if i < len(a_group) else None,
+                'b': b_group[i] if i < len(b_group) else None,
+            })
+
+    conn.close()
+    return render_template('matchup.html',
+        matchup_id=matchup_id, gw=gw, season=season, badges=badges,
+        team_a_id=mu['team_a_id'], team_a_name=mu['a_name'], team_a_team=mu['a_team'], team_a_photo=mu['a_photo'],
+        team_b_id=mu['team_b_id'], team_b_name=mu['b_name'], team_b_team=mu['b_team'], team_b_photo=mu['b_photo'],
+        score_a=mu['a_score'], score_b=mu['b_score'],
+        win_a=mu['a_win'], loss_a=mu['a_loss'], tie_a=mu['a_tie'],
+        win_b=mu['b_win'], loss_b=mu['b_loss'], tie_b=mu['b_tie'],
+        live_score_a=live_score_a, live_score_b=live_score_b,
+        paired_starters=paired_starters,
+        bench_a=side_a['bench'], bench_b=side_b['bench'],
+        ir_a=side_a['ir'], ir_b=side_b['ir'],
+    )
 
 
 def apply_slot_change(conn, manager_id, player_name, gw, new_slot_type, new_position_slot):
@@ -1996,6 +2115,61 @@ def update_roster_slot():
 
     formation = {r['position_slot']: r['cnt'] for r in counts}
     return jsonify({"status": "ok", "formation": formation})
+
+
+@app.route('/api/player-start-status/update', methods=['POST'])
+def update_player_start_status():
+    """
+    Manually record whether a player actually started for their real-world
+    club in a gameweek -- nothing scrapes this, it's purely manager-entered.
+    Global per (player_name, gw, season), not per-manager, since a player
+    is only ever on one active roster at a time. Only the roster owner may
+    set it, mirroring update_roster_slot's ownership check exactly: derive
+    manager_id from the session (never trust the client) and confirm this
+    player is actually on their active roster for this gw.
+
+    status is 'starting' | 'not_starting' | null (null clears back to the
+    blank/unknown state -- the tri-state cycle goes blank -> starting ->
+    not_starting -> blank).
+    """
+    data = request.get_json() or {}
+    manager_id = current_manager_id()
+    player_name = data.get('player_name')
+    gw = data.get('gw')
+    status = data.get('status')
+
+    if not player_name or not gw:
+        return jsonify({"error": "Missing required fields"}), 400
+    gw = int(gw)
+    if status not in (None, 'starting', 'not_starting'):
+        return jsonify({"error": "status must be 'starting', 'not_starting', or null"}), 400
+
+    conn = get_db()
+    owns_player = conn.execute("""
+        SELECT 1 FROM rosters
+        WHERE manager_id=? AND player_name=?
+          AND gw_start <= ? AND (gw_end IS NULL OR gw_end >= ?)
+    """, (manager_id, player_name, gw, gw)).fetchone()
+    if not owns_player:
+        conn.close()
+        return jsonify({"error": "That player isn't on your roster for this GW"}), 404
+
+    if status is None:
+        conn.execute(
+            "DELETE FROM player_start_status WHERE player_name=? AND gw=? AND season=?",
+            (player_name, gw, DRAFT_SEASON)
+        )
+    else:
+        conn.execute("""
+            INSERT INTO player_start_status (player_name, gw, season, status, updated_by, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(player_name, gw, season) DO UPDATE SET
+                status=excluded.status, updated_by=excluded.updated_by, updated_at=excluded.updated_at
+        """, (player_name, gw, DRAFT_SEASON, status, manager_id, now_eastern_naive().isoformat()))
+    conn.commit()
+    conn.close()
+
+    return jsonify({"status": "ok", "player_name": player_name, "gw": gw, "start_status": status})
 
 
 def execute_slot_swap(conn, manager_id, player_a, player_b, gw):

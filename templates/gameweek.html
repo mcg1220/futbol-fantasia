@@ -128,7 +128,7 @@ cd scripts</pre>
     <div class="matchup-card">
 
       <!-- Team A -->
-      <a href="/team/{{ m.team_a_id }}" class="matchup-side {% if m.score_a is not none and m.score_b is not none %}{% if m.win_a %}side-win{% elif m.loss_a %}side-loss{% else %}side-tie{% endif %}{% endif %}">
+      <a href="/matchup/{{ m.id }}" class="matchup-side {% if m.score_a is not none and m.score_b is not none %}{% if m.win_a %}side-win{% elif m.loss_a %}side-loss{% else %}side-tie{% endif %}{% endif %}">
         <div class="matchup-identity">
           {% if m.team_a_photo %}
           <img src="{{ url_for('static', filename=m.team_a_photo) }}" class="team-avatar team-avatar-md" />
@@ -157,7 +157,7 @@ cd scripts</pre>
       <div class="matchup-vs">VS</div>
 
       <!-- Team B -->
-      <a href="/team/{{ m.team_b_id }}" class="matchup-side {% if m.score_a is not none and m.score_b is not none %}{% if m.win_b %}side-win{% elif m.loss_b %}side-loss{% else %}side-tie{% endif %}{% endif %}">
+      <a href="/matchup/{{ m.id }}" class="matchup-side {% if m.score_a is not none and m.score_b is not none %}{% if m.win_b %}side-win{% elif m.loss_b %}side-loss{% else %}side-tie{% endif %}{% endif %}">
         <div class="matchup-identity">
           {% if m.team_b_photo %}
           <img src="{{ url_for('static', filename=m.team_b_photo) }}" class="team-avatar team-avatar-md" />

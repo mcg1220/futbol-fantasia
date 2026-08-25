@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}{{ team_a_name }} vs {{ team_b_name }} · GW{{ gw }} · Fútbol de Fantasía{% endblock %}
+
+{% block content %}
+
+<!-- ── Matchup header ────────────────────────────────────────────────────── -->
+<section class="section">
+  <div class="matchup-card">
+    <a href="/team/{{ team_a_id }}" class="matchup-side {% if score_a is not none and score_b is not none %}{% if win_a %}side-win{% elif loss_a %}side-loss{% else %}side-tie{% endif %}{% endif %}">
+      <div class="matchup-identity">
+        {% if team_a_photo %}
+        <img src="{{ url_for('static', filename=team_a_photo) }}" class="team-avatar team-avatar-md" />
+        {% else %}
+        <div class="team-avatar team-avatar-md team-avatar-placeholder">{{ team_a_name[0]|upper }}</div>
+        {% endif %}
+        <div class="matchup-identity-text">
+          <span class="matchup-manager">{{ team_a_name }}</span>
+          <span class="matchup-team">{{ team_a_team }}</span>
+        </div>
+      </div>
+      <span class="matchup-score">
+        {% if score_a is not none %}{{ "%.2f"|format(score_a) }}
+        {% elif live_score_a is not none %}{{ "%.2f"|format(live_score_a) }}
+        {% else %}—{% endif %}
+      </span>
+      {% if score_a is not none %}
+        {% if win_a %}<span class="matchup-badge badge-win">W</span>
+        {% elif loss_a %}<span class="matchup-badge badge-loss">L</span>
+        {% else %}<span class="matchup-badge badge-tie">T</span>{% endif %}
+      {% elif live_score_a is not none %}
+        <span class="matchup-badge badge-live" title="Live total — not final until the whole gameweek is scraped">LIVE</span>
+      {% endif %}
+    </a>
+
+    <div class="matchup-vs">VS</div>
+
+    <a href="/team/{{ team_b_id }}" class="matchup-side {% if score_a is not none and score_b is not none %}{% if win_b %}side-win{% elif loss_b %}side-loss{% else %}side-tie{% endif %}{% endif %}">
+      <div class="matchup-identity">
+        {% if team_b_photo %}
+        <img src="{{ url_for('static', filename=team_b_photo) }}" class="team-avatar team-avatar-md" />
+        {% else %}
+        <div class="team-avatar team-avatar-md team-avatar-placeholder">{{ team_b_name[0]|upper }}</div>
+        {% endif %}
+        <div class="matchup-identity-text">
+          <span class="matchup-manager">{{ team_b_name }}</span>
+          <span class="matchup-team">{{ team_b_team }}</span>
+        </div>
+      </div>
+      <span class="matchup-score">
+        {% if score_b is not none %}{{ "%.2f"|format(score_b) }}
+        {% elif live_score_b is not none %}{{ "%.2f"|format(live_score_b) }}
+        {% else %}—{% endif %}
+      </span>
+      {% if score_b is not none %}
+        {% if win_b %}<span class="matchup-badge badge-win">W</span>
+        {% elif loss_b %}<span class="matchup-badge badge-loss">L</span>
+        {% else %}<span class="matchup-badge badge-tie">T</span>{% endif %}
+      {% elif live_score_b is not none %}
+        <span class="matchup-badge badge-live" title="Live total — not final until the whole gameweek is scraped">LIVE</span>
+      {% endif %}
+    </a>
+  </div>
+  <div class="pts-note" style="text-align:center;margin-top:6px">GW{{ gw }} · {{ season }}</div>
+</section>
+
+<!-- ── Starting XI, position-aligned ─────────────────────────────────────── -->
+<section class="section">
+  <h3 class="section-title">⚔️ Starting XI</h3>
+  <div class="matchup-vs-table">
+    {% for row in paired_starters %}
+    <div class="matchup-vs-row">
+      <div class="matchup-vs-player mv-left">
+        {% if row.a %}
+        <span class="matchup-vs-name">{{ row.a.player_name }}</span>
+        <span class="matchup-vs-club">
+          {% if row.a.club and badges.get(row.a.club) %}<img src="{{ badges[row.a.club] }}" class="club-badge" />{% endif %}
+          {{ row.a.club or '—' }}
+        </span>
+        {% else %}
+        <span class="matchup-vs-name text-muted-cell">Empty</span>
+        {% endif %}
+      </div>
+      <span class="matchup-vs-pts mv-left">{{ "%.2f"|format(row.a.gw_score) if row.a else '—' }}</span>
+      <span class="matchup-vs-pos pos-badge">{{ row.pos }}</span>
+      <span class="matchup-vs-pts mv-right">{{ "%.2f"|format(row.b.gw_score) if row.b else '—' }}</span>
+      <div class="matchup-vs-player mv-right">
+        {% if row.b %}
+        <span class="matchup-vs-name">{{ row.b.player_name }}</span>
+        <span class="matchup-vs-club">
+          {{ row.b.club or '—' }}
+          {% if row.b.club and badges.get(row.b.club) %}<img src="{{ badges[row.b.club] }}" class="club-badge" />{% endif %}
+        </span>
+        {% else %}
+        <span class="matchup-vs-name text-muted-cell">Empty</span>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<!-- ── Bench ─────────────────────────────────────────────────────────────── -->
+<section class="section">
+  <h3 class="section-title">🪑 Bench</h3>
+  <div class="matchup-grid">
+    <div class="matchup-bench-col">
+      {% for p in bench_a %}
+      <div class="matchup-bench-row">
+        <span>{{ p.player_name }}</span>
+        <span class="text-muted-cell">{{ p.club or '—' }}</span>
+        <span class="matchup-vs-pts">{{ "%.2f"|format(p.gw_score) }}</span>
+      </div>
+      {% else %}
+      <div class="empty-state">No bench players.</div>
+      {% endfor %}
+    </div>
+    <div class="matchup-bench-col">
+      {% for p in bench_b %}
+      <div class="matchup-bench-row">
+        <span>{{ p.player_name }}</span>
+        <span class="text-muted-cell">{{ p.club or '—' }}</span>
+        <span class="matchup-vs-pts">{{ "%.2f"|format(p.gw_score) }}</span>
+      </div>
+      {% else %}
+      <div class="empty-state">No bench players.</div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+{% if ir_a or ir_b %}
+<!-- ── Injury Reserve ────────────────────────────────────────────────────── -->
+<section class="section">
+  <h3 class="section-title">🏥 Injury Reserve</h3>
+  <div class="matchup-grid">
+    <div class="matchup-bench-col">
+      {% for p in ir_a %}
+      <div class="matchup-bench-row">
+        <span>{{ p.player_name }}</span>
+        <span class="text-muted-cell">{{ p.club or '—' }}</span>
+        <span class="matchup-vs-pts">{{ "%.2f"|format(p.gw_score) }}</span>
+      </div>
+      {% else %}
+      <div class="empty-state">Empty.</div>
+      {% endfor %}
+    </div>
+    <div class="matchup-bench-col">
+      {% for p in ir_b %}
+      <div class="matchup-bench-row">
+        <span>{{ p.player_name }}</span>
+        <span class="text-muted-cell">{{ p.club or '—' }}</span>
+        <span class="matchup-vs-pts">{{ "%.2f"|format(p.gw_score) }}</span>
+      </div>
+      {% else %}
+      <div class="empty-state">Empty.</div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{% endblock %}

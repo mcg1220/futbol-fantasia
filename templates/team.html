@@ -62,7 +62,7 @@
         <span class="matchup-badge badge-live" title="Live total from matches scraped so far — not final until the whole gameweek is scraped">LIVE</span>
         {% endif %}
       </div>
-      <a href="/team/{{ matchup.opp_id }}" class="matchup-badge-opp-name">{{ matchup.opp_name }} · {{ matchup.opp_team }}</a>
+      <a href="/matchup/{{ matchup.matchup_id }}" class="matchup-badge-opp-name">{{ matchup.opp_name }} · {{ matchup.opp_team }}</a>
     </div>
     {% endif %}
     <div class="team-switcher">
@@ -127,6 +127,7 @@
         <th rowspan="2" style="text-align:left">Club</th>
         <th rowspan="2" style="text-align:left">Eligible</th>
         <th rowspan="2">Slot</th>
+        <th rowspan="2" title="Did this player actually start for their real-world club this gameweek? Manually recorded, not scraped.">Started?</th>
         <th rowspan="2" style="text-align:left">GW Opponent</th>
         <th colspan="5" class="col-group-header col-group-gw">GW Points</th>
         <th colspan="2" class="col-group-header col-group-season season-col">Season Points</th>
@@ -162,12 +163,14 @@
         {% set uid  = id_prefix ~ '-' ~ loop.index %}
         {% set eligible = eligibility_map.get(player.player_name) %}
         {% set player_locked = locked_map.get(player.player_name, False) %}
+        {% set lock_state = lock_state_map.get(player.player_name, 'not_locked') %}
+        {% set start_status = start_status_map.get(player.player_name) %}
         {% set starter_locked = gw_locked or (player_locked and player.slot_type == 'starter') %}
         {% set starter_options_locked = gw_locked or player_locked %}
 
         {% if show_pos_groups and pos_label and pos_label != ns.cur_pos %}
           {% set ns.cur_pos = pos_label %}
-          <tr class="pos-group-row"><td colspan="13" class="pos-group-label">{{ pos_full }}</td></tr>
+          <tr class="pos-group-row"><td colspan="14" class="pos-group-label">{{ pos_full }}</td></tr>
         {% endif %}
 
         <tr class="player-row" onclick="toggleAccordion('{{ uid }}')">
@@ -206,11 +209,27 @@
               <option value="bench|bench" {% if player.slot_type=='bench' %}selected{% endif %} {% if gw_locked %}disabled{% endif %}>Bench</option>
               <option value="ir|ir"       {% if player.slot_type=='ir'    %}selected{% endif %} {% if gw_locked %}disabled{% endif %}>Injury Reserve</option>
             </select>
-            {% if player_locked or gw_locked %}<span class="lock-icon" title="{% if gw_locked %}GW{{ current_gw }} is locked{% else %}Locked — match already kicked off{% endif %}">🔒</span>{% endif %}
+            {% if lock_state == 'in_progress' %}
+            <span class="lock-icon lock-in-progress" title="Match in progress">⏱️</span>
+            {% elif lock_state == 'finished' %}
+            <span class="lock-icon lock-finished" title="Match finished">🔒</span>
+            {% elif gw_locked %}
+            <span class="lock-icon lock-finished" title="GW{{ current_gw }} is locked">🔒</span>
+            {% endif %}
             {% if manager.id == current_manager_id %}
             <button type="button" class="slot-action-btn" title="Swap with another player" onclick="event.stopPropagation(); startSwap('{{ player.player_name|js_string }}')">🔀</button>
             <button type="button" class="slot-action-btn" title="Drop, no replacement" onclick="event.stopPropagation(); startDrop('{{ player.player_name|js_string }}')">🗑️</button>
             {% endif %}
+          </td>
+          <td onclick="event.stopPropagation()">
+            <button type="button"
+                    class="start-status-btn"
+                    data-player="{{ player.player_name }}"
+                    data-gw="{{ current_gw }}"
+                    data-status="{{ start_status or '' }}"
+                    {% if manager.id != current_manager_id %}disabled{% endif %}
+                    title="{% if manager.id != current_manager_id %}Only {{ manager.name }} can set this{% elif start_status == 'starting' %}Recorded as starting — click to mark not starting{% elif start_status == 'not_starting' %}Recorded as not starting — click to clear{% else %}Not recorded — click to mark starting{% endif %}"
+                    onclick="cycleStartStatus(this)">{% if start_status == 'starting' %}✅{% elif start_status == 'not_starting' %}❌{% else %}⬜{% endif %}</button>
           </td>
           <td style="text-align:left">
             {% if opp != '—' and badges.get(opp) %}<img src="{{ badges[opp] }}" class="club-badge" />{% endif %}
@@ -228,7 +247,7 @@
         </tr>
 
         <tr class="accordion-row" id="{{ uid }}" style="display:none">
-          <td colspan="13">
+          <td colspan="14">
             <div class="stat-accordion">
 
               <div class="stat-group">
@@ -735,6 +754,37 @@ async function updateSlot(selectEl) {
   } catch (e) {
     alert('Network error saving change — please try again.');
     selectEl.disabled = false;
+  }
+}
+
+// ── Manual "actually starting" tri-state (blank -> ✅ -> ❌ -> blank) ───────
+const START_STATUS_CYCLE = { '': 'starting', 'starting': 'not_starting', 'not_starting': '' };
+const START_STATUS_ICON  = { '': '⬜', 'starting': '✅', 'not_starting': '❌' };
+
+async function cycleStartStatus(btn) {
+  const player_name = btn.dataset.player;
+  const gw = btn.dataset.gw;
+  const current = btn.dataset.status || '';
+  const next = START_STATUS_CYCLE[current];
+
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/player-start-status/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ player_name, gw, status: next || null })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      alert('Could not save: ' + (data.error || 'unknown error'));
+      return;
+    }
+    btn.dataset.status = next;
+    btn.textContent = START_STATUS_ICON[next];
+  } catch (e) {
+    alert('Network error saving change — please try again.');
+  } finally {
+    btn.disabled = false;
   }
 }
 

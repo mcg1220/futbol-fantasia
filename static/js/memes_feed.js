@@ -45,11 +45,35 @@ function renderReactions(post) {
     counts[r.emoji] = (counts[r.emoji] || 0) + 1;
     if (String(r.manager_id) === String(myId)) mine.add(r.emoji);
   });
-  return EMOJI_PALETTE.map(emoji => {
+  const buttons = EMOJI_PALETTE.map(emoji => {
     const count = counts[emoji] || 0;
     const mineClass = mine.has(emoji) ? 'mine' : '';
     return `<button type="button" class="meme-reaction-btn ${mineClass}" onclick="toggleReaction(${post.id}, '${emoji}')">${emoji}${count ? ' ' + count : ''}</button>`;
   }).join('');
+
+  const total = (post.reactions || []).length;
+  const reactorsLink = total > 0
+    ? `<button type="button" class="meme-reactors-link" onclick="showReactors(${post.id})">${total} reaction${total === 1 ? '' : 's'}</button>`
+    : '';
+  return buttons + reactorsLink;
+}
+
+// Separate from the toggle-your-own-reaction buttons above so clicking one
+// never conflicts with the other -- this just lists who reacted with what.
+function showReactors(postId) {
+  const post = findPost(postId);
+  if (!post) return;
+  const groups = {};
+  (post.reactions || []).forEach(r => {
+    (groups[r.emoji] = groups[r.emoji] || []).push(r.manager_name);
+  });
+  const body = Object.entries(groups).map(([emoji, names]) => `
+    <div class="reactor-group">
+      <span class="reactor-emoji">${emoji}</span>
+      <span class="reactor-names">${names.map(escapeHtml).join(', ')}</span>
+    </div>`).join('');
+  document.getElementById('reactors-modal-body').innerHTML = body || '<div class="empty-state">No reactions yet.</div>';
+  openModal('reactors-modal');
 }
 
 function renderComments(post) {
