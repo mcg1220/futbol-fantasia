@@ -555,7 +555,11 @@ tr:nth-child(3) .rank-num, tr:nth-child(4) .rank-num { color: var(--pl-magenta);
   color: var(--text-muted);
   border-left: 1px solid var(--border);
   border-right: 1px solid var(--border);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
 }
+a.matchup-vs:hover { background: var(--bg-row-alt); color: var(--pl-magenta); }
 
 /* ── Head-to-head matchup detail page ────────────────────────────────────── */
 .matchup-vs-table {
@@ -581,6 +585,7 @@ tr:nth-child(3) .rank-num, tr:nth-child(4) .rank-num { color: var(--pl-magenta);
 .matchup-vs-name { font-weight: 600; font-size: 14px; }
 .matchup-vs-club { font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 4px; }
 .matchup-vs-player.mv-left .matchup-vs-club { flex-direction: row-reverse; }
+.matchup-vs-opp { font-size: 11px; }
 .matchup-vs-pts {
   font-family: var(--font-display);
   font-weight: 700;
@@ -616,6 +621,7 @@ tr:nth-child(3) .rank-num, tr:nth-child(4) .rank-num { color: var(--pl-magenta);
 }
 .matchup-bench-row:last-child { border-bottom: none; }
 .matchup-bench-row > span:first-child { flex: 1; font-weight: 600; }
+.matchup-bench-club { display: flex; align-items: center; gap: 4px; flex: 1.4; }
 
 /* ── PL fixtures table ───────────────────────────────────────────────────── */
 .fixtures-table td { padding: 8px 14px; }
@@ -841,6 +847,7 @@ tr:nth-child(3) .rank-num, tr:nth-child(4) .rank-num { color: var(--pl-magenta);
 
 /* ── Roster table ────────────────────────────────────────────────────────── */
 .roster-table td { padding: 9px 14px; }
+.roster-table td.slot-cell { white-space: nowrap; }
 .bench-table { opacity: 0.85; }
 .pos-group-row { background: var(--bg-thead) !important; }
 

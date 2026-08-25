@@ -1950,8 +1950,30 @@ def matchup_detail(matchup_id):
         if mu['b_score'] is None:
             live_score_b, _ = calc_team_score_for_gw(conn, mu['team_b_id'], gw, season=season)
 
+    # club -> {'opponent', 'score'} for this gw, score as "club's goals-opponent's
+    # goals" (None if not played yet) -- get_gw_fixture_info only has the
+    # opponent name, not the actual final score, which ESPN's reference
+    # view shows next to every player regardless of slot.
+    club_match_info = {}
+    for f in c.execute("""
+        SELECT f.home_club, f.away_club, f.goals_home, f.goals_away
+        FROM fixtures f JOIN gameweeks g ON g.id = f.gw_id
+        WHERE g.gw_number=? AND f.season=?
+    """, (gw, season)).fetchall():
+        played = f['goals_home'] is not None and f['goals_away'] is not None
+        club_match_info[f['home_club']] = {
+            'opponent': f['away_club'],
+            'score': f"{f['goals_home']}-{f['goals_away']}" if played else None,
+        }
+        club_match_info[f['away_club']] = {
+            'opponent': f['home_club'],
+            'score': f"{f['goals_away']}-{f['goals_home']}" if played else None,
+        }
+
     def build_side(manager_id):
         roster = get_roster_at_gw(conn, manager_id, gw, season)
+        for r in roster:
+            r['match_info'] = club_match_info.get(r['club'])
         return {
             'starters': [r for r in roster if r['slot_type'] == 'starter'],
             'bench': [r for r in roster if r['slot_type'] == 'bench'],

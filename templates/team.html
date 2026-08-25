@@ -182,7 +182,7 @@
           <td style="text-align:left">
             {% for pos in (eligible or []) %}<span class="pos-badge">{{ pos }}</span>{% endfor %}
           </td>
-          <td>
+          <td class="slot-cell">
             <select class="slot-select pos-{{ pos_label if pos_label else 'BENCH' }}"
                     data-player="{{ player.player_name }}"
                     data-manager="{{ manager.id }}"

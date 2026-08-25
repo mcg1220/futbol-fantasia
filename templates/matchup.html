@@ -1,6 +1,18 @@
 {% extends "base.html" %}
 {% block title %}{{ team_a_name }} vs {{ team_b_name }} · GW{{ gw }} · Fútbol de Fantasía{% endblock %}
 
+{% macro bench_row(p) %}
+<div class="matchup-bench-row">
+  <span>{{ p.player_name }}</span>
+  <span class="matchup-bench-club text-muted-cell">
+    {% if p.club and badges.get(p.club) %}<img src="{{ badges[p.club] }}" class="club-badge" />{% endif %}
+    {{ p.club or '—' }}
+    {% if p.match_info %}vs {{ p.match_info.opponent }}{% if p.match_info.score %} {{ p.match_info.score }}{% endif %}{% endif %}
+  </span>
+  <span class="matchup-vs-pts">{{ "%.2f"|format(p.gw_score) }}</span>
+</div>
+{% endmacro %}
+
 {% block content %}
 
 <!-- ── Matchup header ────────────────────────────────────────────────────── -->
@@ -76,6 +88,9 @@
           {% if row.a.club and badges.get(row.a.club) %}<img src="{{ badges[row.a.club] }}" class="club-badge" />{% endif %}
           {{ row.a.club or '—' }}
         </span>
+        {% if row.a.match_info %}
+        <span class="matchup-vs-opp text-muted-cell">vs {{ row.a.match_info.opponent }}{% if row.a.match_info.score %} {{ row.a.match_info.score }}{% endif %}</span>
+        {% endif %}
         {% else %}
         <span class="matchup-vs-name text-muted-cell">Empty</span>
         {% endif %}
@@ -90,6 +105,9 @@
           {{ row.b.club or '—' }}
           {% if row.b.club and badges.get(row.b.club) %}<img src="{{ badges[row.b.club] }}" class="club-badge" />{% endif %}
         </span>
+        {% if row.b.match_info %}
+        <span class="matchup-vs-opp text-muted-cell">vs {{ row.b.match_info.opponent }}{% if row.b.match_info.score %} {{ row.b.match_info.score }}{% endif %}</span>
+        {% endif %}
         {% else %}
         <span class="matchup-vs-name text-muted-cell">Empty</span>
         {% endif %}
@@ -104,24 +122,12 @@
   <h3 class="section-title">🪑 Bench</h3>
   <div class="matchup-grid">
     <div class="matchup-bench-col">
-      {% for p in bench_a %}
-      <div class="matchup-bench-row">
-        <span>{{ p.player_name }}</span>
-        <span class="text-muted-cell">{{ p.club or '—' }}</span>
-        <span class="matchup-vs-pts">{{ "%.2f"|format(p.gw_score) }}</span>
-      </div>
-      {% else %}
+      {% for p in bench_a %}{{ bench_row(p) }}{% else %}
       <div class="empty-state">No bench players.</div>
       {% endfor %}
     </div>
     <div class="matchup-bench-col">
-      {% for p in bench_b %}
-      <div class="matchup-bench-row">
-        <span>{{ p.player_name }}</span>
-        <span class="text-muted-cell">{{ p.club or '—' }}</span>
-        <span class="matchup-vs-pts">{{ "%.2f"|format(p.gw_score) }}</span>
-      </div>
-      {% else %}
+      {% for p in bench_b %}{{ bench_row(p) }}{% else %}
       <div class="empty-state">No bench players.</div>
       {% endfor %}
     </div>
@@ -134,24 +140,12 @@
   <h3 class="section-title">🏥 Injury Reserve</h3>
   <div class="matchup-grid">
     <div class="matchup-bench-col">
-      {% for p in ir_a %}
-      <div class="matchup-bench-row">
-        <span>{{ p.player_name }}</span>
-        <span class="text-muted-cell">{{ p.club or '—' }}</span>
-        <span class="matchup-vs-pts">{{ "%.2f"|format(p.gw_score) }}</span>
-      </div>
-      {% else %}
+      {% for p in ir_a %}{{ bench_row(p) }}{% else %}
       <div class="empty-state">Empty.</div>
       {% endfor %}
     </div>
     <div class="matchup-bench-col">
-      {% for p in ir_b %}
-      <div class="matchup-bench-row">
-        <span>{{ p.player_name }}</span>
-        <span class="text-muted-cell">{{ p.club or '—' }}</span>
-        <span class="matchup-vs-pts">{{ "%.2f"|format(p.gw_score) }}</span>
-      </div>
-      {% else %}
+      {% for p in ir_b %}{{ bench_row(p) }}{% else %}
       <div class="empty-state">Empty.</div>
       {% endfor %}
     </div>

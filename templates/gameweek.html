@@ -154,7 +154,7 @@ cd scripts</pre>
         {% endif %}
       </a>
 
-      <div class="matchup-vs">VS</div>
+      <a href="/matchup/{{ m.id }}" class="matchup-vs" title="View full matchup">VS</a>
 
       <!-- Team B -->
       <a href="/matchup/{{ m.id }}" class="matchup-side {% if m.score_a is not none and m.score_b is not none %}{% if m.win_b %}side-win{% elif m.loss_b %}side-loss{% else %}side-tie{% endif %}{% endif %}">
