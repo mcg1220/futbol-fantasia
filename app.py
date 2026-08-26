@@ -2521,14 +2521,14 @@ def history():
         """, (as_manager_id, waiver_window['id'])).fetchall()]
 
     waiver_windows_rows = c.execute(
-        "SELECT * FROM waiver_windows WHERE season=? ORDER BY window_number DESC", (season,)
+        "SELECT * FROM waiver_windows WHERE season=? AND status='complete' ORDER BY window_number DESC", (season,)
     ).fetchall()
     waiver_results = []
     for w in waiver_windows_rows:
         claims = c.execute("""
             SELECT wc.*, m.name AS manager_name, m.team_name
             FROM waiver_claims wc JOIN managers m ON m.id = wc.manager_id
-            WHERE wc.window_id=? ORDER BY wc.sequence_number
+            WHERE wc.window_id=? AND wc.status != 'pending' ORDER BY wc.sequence_number
         """, (w['id'],)).fetchall()
         waiver_results.append({**dict(w), 'claims': [dict(cl) for cl in claims]})
 
