@@ -72,9 +72,12 @@ TARGETS = [
 ]
 
 # Non-accent mismatches (nicknames, etc.) found by hand -- see module
-# docstring. (wrong_name_in_raw_stats, canonical_name_in_players)
+# docstring. (name currently in players/db, name WhoScored actually uses --
+# renamed FROM the first TO the second, same direction as the automatic
+# accent fix above: the pool always converges on WhoScored's spelling, so
+# future scrapes keep matching.)
 MANUAL_PAIRS = [
-    ("Josh King", "Joshua King"),
+    ("Joshua King", "Josh King"),
 ]
 
 
@@ -117,18 +120,15 @@ def find_pairs(conn):
             unmatched.append(orphan)
 
     # Fold in the manually-curated non-accent pairs, skipping any that are
-    # already fixed (wrong_name no longer appears anywhere) or that would
-    # collide with an existing canonical row -- keeps re-runs a no-op.
-    canonical_set_now = set(canonical_names)
+    # already fixed (wrong_name no longer appears anywhere) -- keeps re-runs
+    # a no-op. rename_everywhere/merge_duplicate_player below already handle
+    # a collision with an existing row under the target name, if there is one.
     for wrong_name, canonical_name in MANUAL_PAIRS:
         still_present = any(
             conn.execute(f"SELECT 1 FROM {table} WHERE {col}=? LIMIT 1", (wrong_name,)).fetchone()
             for table, col in TARGETS
         )
         if not still_present:
-            continue
-        if canonical_name not in canonical_set_now:
-            unmatched.append(wrong_name)
             continue
         confident_pairs.append((wrong_name, canonical_name))
 
