@@ -3091,7 +3091,7 @@ def check_position_counts(conn, manager_id, gw):
     return {'positions': positions, 'ok': ok}
 
 
-def check_ir_eligibility(conn, manager_id, gw):
+def check_ir_eligibility(conn, manager_id, gw, season=DRAFT_SEASON):
     """False if the manager's current IR occupant appeared in a raw_stats
     row for gw-1 (i.e. was in their club's live matchday squad, including an
     unused healthy scratch) -- meaning they weren't actually unavailable and
@@ -3108,9 +3108,18 @@ def check_ir_eligibility(conn, manager_id, gw):
     """, (manager_id, gw, gw)).fetchone()
     if not row:
         return {'ok': True, 'player_name': None, 'club': None}
+    # raw_stats has no season column -- gw_number alone is ambiguous between
+    # seasons (e.g. both 2025-26 and 2026-27 have a GW1), so this must
+    # resolve match_id through fixtures/gameweeks (season-scoped) rather
+    # than matching raw_stats.gw_number directly, same fix as
+    # get_roster_at_gw's identical bug earlier this season.
     appeared = conn.execute("""
-        SELECT 1 FROM raw_stats WHERE player_name=? AND gw_number=? AND external=0 LIMIT 1
-    """, (row['player_name'], gw - 1)).fetchone()
+        SELECT 1 FROM raw_stats rs
+        JOIN fixtures f ON f.match_id = rs.match_id
+        JOIN gameweeks g ON g.id = f.gw_id
+        WHERE rs.player_name=? AND g.gw_number=? AND f.season=? AND rs.external=0
+        LIMIT 1
+    """, (row['player_name'], gw - 1, season)).fetchone()
     return {'ok': appeared is None, 'player_name': row['player_name'], 'club': row['club']}
 
 
