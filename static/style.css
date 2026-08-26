@@ -404,7 +404,7 @@ tr:nth-child(3) .rank-num, tr:nth-child(4) .rank-num { color: var(--pl-magenta);
 .gw-arrow:hover { background: var(--pl-magenta-bg); }
 .gw-arrow.disabled { color: var(--text-muted); cursor: default; }
 
-.scrape-btn {
+.scrape-btn, .close-gw-btn {
   font-family: var(--font-body);
   font-size: 13px;
   font-weight: 700;
@@ -419,9 +419,9 @@ tr:nth-child(3) .rank-num, tr:nth-child(4) .rank-num { color: var(--pl-magenta);
   transform: translateY(0);
 }
 
-.scrape-btn:hover    { opacity: 0.92; }
-.scrape-btn:active   { transform: translateY(4px); box-shadow: 0 1px 0 #a3013e, 0 2px 4px rgba(0,0,0,0.25); }
-.scrape-btn:disabled { opacity: 0.55; cursor: not-allowed; transform: translateY(4px); box-shadow: 0 1px 0 #a3013e, 0 2px 4px rgba(0,0,0,0.25); }
+.scrape-btn:hover, .close-gw-btn:hover    { opacity: 0.92; }
+.scrape-btn:active, .close-gw-btn:active   { transform: translateY(4px); box-shadow: 0 1px 0 #a3013e, 0 2px 4px rgba(0,0,0,0.25); }
+.scrape-btn:disabled, .close-gw-btn:disabled { opacity: 0.55; cursor: not-allowed; transform: translateY(4px); box-shadow: 0 1px 0 #a3013e, 0 2px 4px rgba(0,0,0,0.25); }
 
 /* ── Button-press fun overlay ─────────────────────────────────────────────── */
 .button-fun-overlay {

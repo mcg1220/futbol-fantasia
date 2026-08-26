@@ -39,8 +39,30 @@
     <button class="scrape-btn" id="scrapeBtn" onclick="openScrapeModal()">
       🔄 Press the Button
     </button>
+
+    {% if fully_scraped %}
+    <button class="close-gw-btn" id="closeGwBtn" onclick="closeGameweek({{ gw }})">
+      {% if already_finalized %}🔁 Re-finalize GW{{ gw }}{% else %}🏁 Close GW{{ gw }}{% endif %}
+    </button>
+    {% endif %}
   </div>
 </section>
+
+{% if top_scorer %}
+<section class="section">
+  <div class="table-wrap" style="padding:14px 20px;display:flex;align-items:center;gap:10px">
+    <span style="font-size:1.3em">🏆</span>
+    <span>
+      <strong>Top Scorer, GW{{ gw }}:</strong>
+      {{ top_scorer.player_name }}
+      {% if top_scorer.club and badges.get(top_scorer.club) %}<img src="{{ badges[top_scorer.club] }}" class="club-badge" />{% endif %}
+      {{ top_scorer.club }} —
+      <span style="color:var(--pl-magenta);font-weight:700">{{ "%.2f"|format(top_scorer.gw_score) }} pts</span>
+      <span class="text-muted-cell">({{ top_scorer.manager_name }})</span>
+    </span>
+  </div>
+</section>
+{% endif %}
 
 <!-- ── Button-press fun overlay ─────────────────────────────────────────── -->
 <div id="buttonFunOverlay" class="button-fun-overlay" style="display:none">
@@ -360,6 +382,24 @@ async function confirmScrape(gw) {
     btn.disabled = false;
     btn.textContent = '🔄 Press the Button';
   }
+}
+
+async function closeGameweek(gwNumber) {
+  if (!confirm(`Close GW${gwNumber}? This locks in final scores, Win/Loss/Tie, and any IR/formation penalties for every matchup.`)) return;
+  const btn = document.getElementById('closeGwBtn');
+  btn.disabled = true;
+  const res = await fetch('/api/gameweek/close', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ gw: gwNumber })
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    alert(data.error || 'Close failed');
+    btn.disabled = false;
+    return;
+  }
+  window.location.reload();
 }
 </script>
 

@@ -1367,6 +1367,13 @@ def gameweek(gw=None):
 
     managers = c.execute("SELECT id, name FROM managers ORDER BY name").fetchall()
 
+    fully_scraped = gw_fully_scraped(conn, season, gw)
+    already_finalized = c.execute("""
+        SELECT 1 FROM results r JOIN gameweeks g ON g.id = r.gw_id
+        WHERE g.season=? AND g.gw_number=? LIMIT 1
+    """, (season, gw)).fetchone() is not None
+    top_scorer = get_gw_top_scorer(conn, season, gw) if already_finalized else None
+
     conn.close()
 
     return render_template('gameweek.html',
@@ -1379,6 +1386,9 @@ def gameweek(gw=None):
         scraper_status=read_scraper_status(),
         badges=badges,
         managers=managers,
+        fully_scraped=fully_scraped,
+        already_finalized=already_finalized,
+        top_scorer=top_scorer,
     )
 
 
@@ -3201,6 +3211,79 @@ def finalize_gw_results(conn, gw_number, season=DRAFT_SEASON):
             """, (gw_id, manager_id, mu['id'], score, win, loss, tie))
 
     conn.commit()
+
+
+def get_gw_top_scorer(conn, season, gw_number):
+    """Single highest-scoring player across every manager's full roster
+    (starters, bench, IR) for this gw -- the league-wide "player of the
+    week". Meant to be called once the gw is finalized (see
+    finalize_gw_results); returns None if nobody has a roster yet."""
+    best = None
+    for m in conn.execute("SELECT id, name FROM managers").fetchall():
+        for r in get_roster_at_gw(conn, m['id'], gw_number, season):
+            if best is None or r['gw_score'] > best['gw_score']:
+                best = {
+                    'player_name': r['player_name'],
+                    'club': r['club'],
+                    'gw_score': r['gw_score'],
+                    'manager_name': m['name'],
+                }
+    return best
+
+
+@app.route('/api/gameweek/close', methods=['POST'])
+def close_gameweek():
+    """
+    Manually trigger finalize_gw_results() for a gameweek -- the button
+    counterpart to what the old subprocess-based scraper already did
+    automatically on completion. Needed because the local
+    scrape-and-upload stopgap (/api/scrape/upload, in use since WhoScored
+    started blocking Render's IP) only writes raw_stats and never calls
+    finalize_gw_results itself. Safe to call again on an already-closed gw
+    (e.g. after a corrective rescrape) -- finalize_gw_results is idempotent.
+    """
+    data = request.get_json() or {}
+    try:
+        gw = int(data.get('gw'))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Missing or invalid gw"}), 400
+
+    conn = get_db()
+    season = DRAFT_SEASON
+    if not gw_fully_scraped(conn, season, gw):
+        conn.close()
+        return jsonify({"error": f"GW{gw} isn't fully scraped yet -- not every fixture has stats."}), 409
+
+    finalize_gw_results(conn, gw, season=season)
+
+    matchups = conn.execute("""
+        SELECT mu.id, ma.name AS team_a_name, mb.name AS team_b_name,
+               ra.fantasy_score AS score_a, rb.fantasy_score AS score_b,
+               ra.win AS win_a, rb.win AS win_b, ra.tie AS tie
+        FROM matchups mu
+        JOIN managers ma ON ma.id = mu.team_a_id
+        JOIN managers mb ON mb.id = mu.team_b_id
+        JOIN results ra ON ra.matchup_id = mu.id AND ra.manager_id = mu.team_a_id
+        JOIN results rb ON rb.matchup_id = mu.id AND rb.manager_id = mu.team_b_id
+        WHERE mu.season=? AND mu.gw_number=?
+        ORDER BY ma.name
+    """, (season, gw)).fetchall()
+    summary = [{
+        'team_a_name': m['team_a_name'], 'team_b_name': m['team_b_name'],
+        'score_a': m['score_a'], 'score_b': m['score_b'],
+        'winner': m['team_a_name'] if m['win_a'] else (m['team_b_name'] if m['win_b'] else None),
+        'tie': bool(m['tie']),
+    } for m in matchups]
+    top_scorer = get_gw_top_scorer(conn, season, gw)
+
+    log_audit(conn, current_manager_id(), 'gameweek', 'closed',
+              f"Closed GW{gw} — {len(summary)} matchup(s) finalized",
+              {"gw": gw, "season": season, "matchups": summary})
+    conn.commit()
+    conn.close()
+
+    return jsonify({"status": "ok", "gw": gw, "matchups": summary, "top_scorer": top_scorer})
+
 
 # Single source of truth for the 21 raw-stat columns shown on the Main Draft
 # pool table and (via compute_full_player_stats) the Transfer Draft tables.
