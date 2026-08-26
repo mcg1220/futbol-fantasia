@@ -242,13 +242,20 @@ def write_scraper_status(data):
 
 
 def get_current_gw(conn, season):
+    """The gw a manager should be managing right now: one past the last gw
+    that's actually been closed (see finalize_gw_results), or gw 1 if none
+    has closed yet. Deliberately NOT "the last gw with results" -- that
+    would keep pointing at a gw that's already over (and permanently
+    locked) for the entire multi-week gap until the *next* gw also closes,
+    which silently blocked trades/swaps against it via is_gw_locked."""
     row = conn.execute("""
         SELECT MAX(g.gw_number)
         FROM results r
         JOIN gameweeks g ON g.id = r.gw_id
         WHERE g.season = ?
     """, (season,)).fetchone()[0]
-    return row if row else 1
+    last_closed = row or 0
+    return min(last_closed + 1, 33)
 
 
 def gw_change_label(conn, season, gw):
@@ -1301,13 +1308,7 @@ def gameweek(gw=None):
     badges = load_badges()
 
     if gw is None:
-        row = c.execute("""
-            SELECT MAX(g.gw_number)
-            FROM results r
-            JOIN gameweeks g ON g.id = r.gw_id
-            WHERE g.season = ?
-        """, (season,)).fetchone()[0]
-        gw = row if row else 1
+        gw = get_current_gw(conn, season)
 
     gw = max(1, min(gw, 33))
 
@@ -1426,13 +1427,7 @@ def team(manager_id):
         "SELECT id, name, team_name, photo_path FROM managers ORDER BY name"
     ).fetchall()
 
-    row = c.execute("""
-        SELECT MAX(g.gw_number)
-        FROM results r
-        JOIN gameweeks g ON g.id = r.gw_id
-        WHERE g.season = ?
-    """, (season,)).fetchone()[0]
-    current_gw = row if row else 1
+    current_gw = get_current_gw(conn, season)
 
     matchup = c.execute("""
         SELECT
