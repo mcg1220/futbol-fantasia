@@ -2525,6 +2525,12 @@ def history():
             ORDER BY priority
         """, (as_manager_id, waiver_window['id'])).fetchall()]
 
+    my_pending_claims = []
+    if as_manager_id:
+        my_pending_claims = [dict(r) for r in c.execute("""
+            SELECT * FROM pending_waiver_claims WHERE manager_id=? AND season=? ORDER BY id
+        """, (as_manager_id, season)).fetchall()]
+
     waiver_windows_rows = c.execute(
         "SELECT * FROM waiver_windows WHERE season=? AND status='complete' ORDER BY window_number DESC", (season,)
     ).fetchall()
@@ -2577,6 +2583,7 @@ def history():
         waiver_window=dict(waiver_window) if waiver_window else None,
         waiver_order=waiver_order,
         my_claims=my_claims,
+        my_pending_claims=my_pending_claims,
         waiver_results=waiver_results,
         stat_cols=STAT_COLS,
     )
@@ -2678,13 +2685,13 @@ def execute_roster_swap(conn, manager_id, add_player, drop_player, gw, source, t
 
     `drop_player` may be None/falsy — a pure add, only allowed when the
     manager has an open non-IR roster spot (see count_active_roster_slots).
-    The incoming player lands on the bench in that case, UNLESS `to_ir` is
-    also set, in which case they go straight to IR instead — IR is a single
-    reserved spot that doesn't count against the 15-man cap (see
-    count_active_roster_slots's docstring), so this bypasses that cap check
-    entirely and only requires IR to currently be empty. `to_ir` only has an
-    effect when `drop_player` is falsy; a drop-and-add always follows the
-    existing inherit-the-dropped-slot-or-bench rule below.
+    `to_ir` is an explicit, always-honored request to land the incoming
+    player on IR instead of the bench — IR is a single reserved spot that
+    doesn't count against the 15-man cap (see count_active_roster_slots's
+    docstring). It's safe whether or not a drop_player is also given: if
+    the dropped player is themself the current IR occupant, this drop
+    frees the exact slot being filled; otherwise IR must currently be
+    empty, which is checked either way.
 
     Shared by the instant Add/Drop endpoint and the waiver processing
     algorithm — `source` tags the resulting transaction ('roster_swap' or
@@ -2714,6 +2721,16 @@ def execute_roster_swap(conn, manager_id, add_player, drop_player, gw, source, t
         locked, reason = is_change_locked(conn, DRAFT_SEASON, gw, drop_club, drop_row['slot_type'], None)
         if locked:
             return False, {"error": reason}
+        if to_ir and drop_row['slot_type'] != 'ir':
+            # Sending the incoming player to IR, but this drop isn't the
+            # one vacating it — IR must already be empty independently.
+            existing_ir = c.execute("""
+                SELECT 1 FROM rosters
+                WHERE manager_id=? AND slot_type='ir'
+                  AND gw_start<=? AND (gw_end IS NULL OR gw_end>=?)
+            """, (manager_id, gw, gw)).fetchone()
+            if existing_ir:
+                return False, {"error": "Only one player can be on IR at a time."}
     elif to_ir:
         existing_ir = c.execute("""
             SELECT 1 FROM rosters
@@ -2739,15 +2756,16 @@ def execute_roster_swap(conn, manager_id, add_player, drop_player, gw, source, t
         WHERE p.name = ?
     """, (add_player,)).fetchall()}
 
-    if drop_row and drop_row['position_slot'] in eligible:
-        new_slot_type = drop_row['slot_type']
-        new_position_slot = drop_row['position_slot']
-    elif to_ir:
+    if to_ir:
         # Matches the literal 'ir'/'ir' convention update_roster_slot() uses
         # (team.html's slot <select> sends value="ir|ir") — IR isn't a real
         # position, so position_slot is the marker string, not a position code.
+        # Explicit intent always wins here, even over an eligible dropped slot.
         new_slot_type = 'ir'
         new_position_slot = 'ir'
+    elif drop_row and drop_row['position_slot'] in eligible:
+        new_slot_type = drop_row['slot_type']
+        new_position_slot = drop_row['position_slot']
     else:
         new_slot_type = 'bench'
         new_position_slot = sorted(eligible)[0] if eligible else None
@@ -2802,6 +2820,35 @@ def swap_roster_player():
         return jsonify({"error": "Missing required fields"}), 400
 
     conn = get_db()
+
+    # An instant add of a player whose real club has already kicked off
+    # would let anyone snipe a known-good performance ahead of the fair
+    # waiver queue -- redirect it into a claim instead, regardless of
+    # whether a window happens to be open right now (see
+    # submit_or_queue_claim's docstring for why we never auto-open one).
+    add_club_row = conn.execute("SELECT club FROM players WHERE name=?", (add_player,)).fetchone()
+    add_club = add_club_row['club'] if add_club_row else None
+    if add_club and is_player_locked(conn, DRAFT_SEASON, gw, add_club):
+        ok, err = validate_claim_target(conn, manager_id, add_player, drop_player, gw, to_ir)
+        if not ok:
+            conn.close()
+            status = 404 if 'not on this roster' in err else 409
+            return jsonify({"error": err}), status
+
+        result = submit_or_queue_claim(conn, manager_id, add_player, drop_player, gw, to_ir, DRAFT_SEASON)
+        summary = f"Auto-converted locked add to waiver claim: add {add_player}"
+        summary += f", drop {drop_player}" if drop_player else (" — direct to IR" if to_ir else " (no drop needed)")
+        log_audit(conn, manager_id, 'waiver',
+                  'claim_submitted' if result['window_open'] else 'claim_queued_pending', summary,
+                  {"add_player": add_player, "drop_player": drop_player, "gw": gw, "to_ir": to_ir})
+        conn.commit()
+        conn.close()
+
+        message = (f"{add_player} has already played — submitted as a waiver claim into the open window instead of an instant add."
+                   if result['window_open'] else
+                   f"{add_player} has already played this gameweek — queued as a waiver claim for the next window.")
+        return jsonify({"status": "converted_to_pending_waiver", "message": message, "window_open": result['window_open']})
+
     ok, info = execute_roster_swap(conn, manager_id, add_player, drop_player, gw, 'roster_swap', to_ir=to_ir)
     if not ok:
         conn.close()
@@ -3314,6 +3361,76 @@ def get_open_waiver_window(conn, season):
     ).fetchone()
 
 
+def validate_claim_target(conn, manager_id, add_player, drop_player, gw, to_ir):
+    """Best-effort pre-flight check shared by waiver_claim(), the locked-add
+    redirect in swap_roster_player(), and pending-claim promotion in
+    waiver_open() -- ownership, drop-row existence, roster capacity, and IR
+    occupancy. This is deliberately "best effort": real enforcement happens
+    again inside execute_roster_swap at actual processing time, since
+    roster state can drift between submitting a claim and it being applied.
+    Returns (ok: bool, error: str-or-None).
+    """
+    c = conn.cursor()
+    owned = c.execute("""
+        SELECT 1 FROM rosters
+        WHERE player_name=? AND gw_start <= ? AND (gw_end IS NULL OR gw_end >= ?)
+    """, (add_player, gw, gw)).fetchone()
+    if owned:
+        return False, f"{add_player} is already owned"
+
+    drop_row = None
+    if drop_player:
+        drop_row = c.execute("""
+            SELECT slot_type FROM rosters WHERE manager_id=? AND player_name=?
+              AND gw_start <= ? AND (gw_end IS NULL OR gw_end >= ?)
+        """, (manager_id, drop_player, gw, gw)).fetchone()
+        if not drop_row:
+            return False, f"{drop_player} is not on this roster"
+
+    if to_ir and not (drop_row and drop_row['slot_type'] == 'ir'):
+        existing_ir = c.execute("""
+            SELECT 1 FROM rosters WHERE manager_id=? AND slot_type='ir'
+              AND gw_start<=? AND (gw_end IS NULL OR gw_end>=?)
+        """, (manager_id, gw, gw)).fetchone()
+        if existing_ir:
+            return False, "Only one player can be on IR at a time."
+    elif not drop_player and not to_ir:
+        if count_active_roster_slots(conn, manager_id, gw) >= PLAYER_PICKS_PER_TEAM:
+            return False, "Your roster is full — drop a player to submit this claim (or free up a spot by moving someone to IR)."
+
+    return True, None
+
+
+def submit_or_queue_claim(conn, manager_id, add_player, drop_player, gw, to_ir, season):
+    """Land a claim in the currently open waiver window, or -- if none is
+    open -- stage it in pending_waiver_claims to be promoted the next time
+    one is manually opened (see waiver_open()). We deliberately never
+    auto-open a window here: opening one is a single global toggle
+    (templates/history.html's Add-vs-Claim button) that would collaterally
+    convert every other manager's still-valid instant "Add" for a
+    not-yet-played player into a slow "Claim" too. Caller must have already
+    run validate_claim_target. Does not commit.
+    Returns {"window_open": bool}.
+    """
+    window = get_open_waiver_window(conn, season)
+    if window:
+        next_priority = conn.execute("""
+            SELECT COALESCE(MAX(priority), 0) + 1 FROM waiver_claims
+            WHERE window_id=? AND manager_id=? AND status='pending'
+        """, (window['id'], manager_id)).fetchone()[0]
+        conn.execute("""
+            INSERT INTO waiver_claims (window_id, manager_id, add_player, drop_player, to_ir, priority, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+        """, (window['id'], manager_id, add_player, drop_player, 1 if to_ir else 0,
+              next_priority, now_eastern_naive().isoformat()))
+    else:
+        conn.execute("""
+            INSERT INTO pending_waiver_claims (season, manager_id, add_player, drop_player, to_ir, gw, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (season, manager_id, add_player, drop_player, 1 if to_ir else 0, gw, now_eastern_naive().isoformat()))
+    return {"window_open": bool(window)}
+
+
 def get_waiver_order(conn, season):
     rows = conn.execute("""
         SELECT wo.manager_id, wo.position, m.name, m.team_name
@@ -3372,9 +3489,46 @@ def waiver_open():
             "INSERT INTO waiver_windows (season, window_number, gw, status, opened_at) VALUES (?, ?, ?, 'open', ?)",
             (season, next_num, gw, now_eastern_naive().isoformat())
         )
+        window_id = conn.execute(
+            "SELECT id FROM waiver_windows WHERE season=? AND window_number=?", (season, next_num)
+        ).fetchone()['id']
         log_audit(conn, None, 'waiver', 'open_window', f"Opened waiver window #{next_num} (GW{gw})")
+
+        # Fold in any locked-add pickups that were queued while no window
+        # existed (see submit_or_queue_claim) -- re-validate each against
+        # current roster state, since it may have drifted since it was
+        # queued, rather than trusting the queued row blindly.
+        pending_rows = conn.execute(
+            "SELECT * FROM pending_waiver_claims WHERE season=? ORDER BY manager_id, id", (season,)
+        ).fetchall()
+        priority_by_manager = {}
+        promoted = 0
+        for row in pending_rows:
+            ok, err = validate_claim_target(conn, row['manager_id'], row['add_player'], row['drop_player'], gw, bool(row['to_ir']))
+            if not ok:
+                log_audit(conn, row['manager_id'], 'waiver', 'pending_claim_dropped',
+                          f"Could not promote queued claim for {row['add_player']}: {err}")
+                continue
+            next_priority = priority_by_manager.get(row['manager_id'])
+            if next_priority is None:
+                next_priority = conn.execute("""
+                    SELECT COALESCE(MAX(priority), 0) + 1 FROM waiver_claims
+                    WHERE window_id=? AND manager_id=? AND status='pending'
+                """, (window_id, row['manager_id'])).fetchone()[0]
+            conn.execute("""
+                INSERT INTO waiver_claims (window_id, manager_id, add_player, drop_player, to_ir, priority, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+            """, (window_id, row['manager_id'], row['add_player'], row['drop_player'],
+                  row['to_ir'], next_priority, now_eastern_naive().isoformat()))
+            priority_by_manager[row['manager_id']] = next_priority + 1
+            promoted += 1
+            log_audit(conn, row['manager_id'], 'waiver', 'claim_promoted',
+                      f"Queued claim for {row['add_player']} promoted into waiver window #{next_num}",
+                      {"add_player": row['add_player'], "drop_player": row['drop_player'], "to_ir": bool(row['to_ir'])})
+        conn.execute("DELETE FROM pending_waiver_claims WHERE season=?", (season,))
+
         conn.commit()
-        return jsonify({"status": "ok", "window_number": next_num, "gw": gw})
+        return jsonify({"status": "ok", "window_number": next_num, "gw": gw, "promoted_pending_claims": promoted})
     except Exception as e:
         conn.rollback()
         print(f"waiver_open error: {traceback.format_exc()}")
@@ -3389,6 +3543,7 @@ def waiver_claim():
     manager_id  = current_manager_id()
     add_player  = data.get('add_player')
     drop_player = data.get('drop_player') or None
+    to_ir       = bool(data.get('to_ir'))
     gw          = data.get('gw')
 
     if not add_player or not gw:
@@ -3407,25 +3562,11 @@ def waiver_claim():
             conn.execute("ROLLBACK")
             return jsonify({"error": "No waiver window is currently open."}), 409
 
-        owned = conn.execute("""
-            SELECT 1 FROM rosters
-            WHERE player_name=? AND gw_start <= ? AND (gw_end IS NULL OR gw_end >= ?)
-        """, (add_player, gw, gw)).fetchone()
-        if owned:
+        ok, err = validate_claim_target(conn, manager_id, add_player, drop_player, gw, to_ir)
+        if not ok:
             conn.execute("ROLLBACK")
-            return jsonify({"error": f"{add_player} is already owned"}), 409
-
-        if drop_player:
-            drop_row = conn.execute("""
-                SELECT id FROM rosters WHERE manager_id=? AND player_name=?
-                  AND gw_start <= ? AND (gw_end IS NULL OR gw_end >= ?)
-            """, (manager_id, drop_player, gw, gw)).fetchone()
-            if not drop_row:
-                conn.execute("ROLLBACK")
-                return jsonify({"error": f"{drop_player} is not on this roster"}), 404
-        elif count_active_roster_slots(conn, manager_id, gw) >= PLAYER_PICKS_PER_TEAM:
-            conn.execute("ROLLBACK")
-            return jsonify({"error": "Your roster is full — drop a player to submit this claim (or free up a spot by moving someone to IR)."}), 409
+            status = 404 if 'not on this roster' in err else 409
+            return jsonify({"error": err}), status
 
         next_priority = conn.execute("""
             SELECT COALESCE(MAX(priority), 0) + 1 FROM waiver_claims
@@ -3433,13 +3574,13 @@ def waiver_claim():
         """, (window['id'], manager_id)).fetchone()[0]
 
         conn.execute("""
-            INSERT INTO waiver_claims (window_id, manager_id, add_player, drop_player, priority, status, created_at)
-            VALUES (?, ?, ?, ?, ?, 'pending', ?)
-        """, (window['id'], manager_id, add_player, drop_player, next_priority, now_eastern_naive().isoformat()))
+            INSERT INTO waiver_claims (window_id, manager_id, add_player, drop_player, to_ir, priority, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+        """, (window['id'], manager_id, add_player, drop_player, 1 if to_ir else 0, next_priority, now_eastern_naive().isoformat()))
         claim_summary = f"Submitted waiver claim: add {add_player}"
-        claim_summary += f", drop {drop_player}" if drop_player else " (no drop — had an open roster spot)"
+        claim_summary += f", drop {drop_player}" if drop_player else (" — direct to IR" if to_ir else " (no drop — had an open roster spot)")
         log_audit(conn, manager_id, 'waiver', 'claim_submitted', claim_summary,
-                  {"add_player": add_player, "drop_player": drop_player, "gw": gw})
+                  {"add_player": add_player, "drop_player": drop_player, "gw": gw, "to_ir": to_ir})
         conn.commit()
         return jsonify({"status": "ok"})
     except Exception as e:
@@ -3515,6 +3656,29 @@ def waiver_claim_delete(claim_id):
     except Exception as e:
         conn.rollback()
         print(f"waiver_claim_delete error: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
+
+@app.route('/api/waiver/pending-claim/<int:claim_id>', methods=['DELETE'])
+def pending_waiver_claim_delete(claim_id):
+    conn = get_db()
+    try:
+        claim = conn.execute("SELECT * FROM pending_waiver_claims WHERE id=?", (claim_id,)).fetchone()
+        if not claim:
+            return jsonify({"error": "Claim not found"}), 404
+        if claim['manager_id'] != current_manager_id():
+            return jsonify({"error": "Only the manager who submitted this claim can cancel it"}), 403
+        conn.execute("DELETE FROM pending_waiver_claims WHERE id=?", (claim_id,))
+        cancel_summary = f"Cancelled queued waiver claim: add {claim['add_player']}"
+        cancel_summary += f", drop {claim['drop_player']}" if claim['drop_player'] else " (no drop)"
+        log_audit(conn, claim['manager_id'], 'waiver', 'cancel_pending_claim', cancel_summary)
+        conn.commit()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        conn.rollback()
+        print(f"pending_waiver_claim_delete error: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
@@ -3616,7 +3780,8 @@ def waiver_process():
                 pending[next_manager].pop(0)
                 continue
 
-            ok, info = execute_roster_swap(conn, next_manager, claim['add_player'], claim['drop_player'], gw, 'waiver_claim')
+            ok, info = execute_roster_swap(conn, next_manager, claim['add_player'], claim['drop_player'], gw,
+                                            'waiver_claim', to_ir=bool(claim.get('to_ir')))
             if ok:
                 conn.execute(
                     "UPDATE waiver_claims SET status='success', sequence_number=? WHERE id=?",
