@@ -19,31 +19,38 @@ from init_db import DB_PATH
 def get_team_goals_conceded(conn, match_id, club):
     """
     Goals conceded by club = opponent goals scored + own team's own goals.
+    Single query (was two) -- same result, half the DB round trips.
     """
     c = conn.cursor()
-    row = c.execute(
-        "SELECT SUM(goals) FROM raw_stats WHERE match_id = ? AND club != ?",
-        (match_id, club)
-    ).fetchone()
+    row = c.execute("""
+        SELECT
+            SUM(CASE WHEN club != ? THEN goals ELSE 0 END),
+            SUM(CASE WHEN club = ? THEN own_goals ELSE 0 END)
+        FROM raw_stats WHERE match_id = ?
+    """, (club, club, match_id)).fetchone()
     opponent_goals = row[0] or 0
-
-    row = c.execute(
-        "SELECT SUM(own_goals) FROM raw_stats WHERE match_id = ? AND club = ?",
-        (match_id, club)
-    ).fetchone()
-    own_goals = row[0] or 0
+    own_goals = row[1] or 0
 
     return int(opponent_goals) + int(own_goals)
 
 
+_scoring_config_cache = {}
+
+
 def get_scoring_config(conn, season="2025-26"):
-    """Load scoring config into a dict keyed by stat."""
-    c = conn.cursor()
-    rows = c.execute(
-        "SELECT stat, points, positions FROM scoring_config WHERE season = ?",
-        (season,)
-    ).fetchall()
-    return {stat: (points, positions.split(",")) for stat, points, positions in rows}
+    """Load scoring config into a dict keyed by stat. Cached by season, not
+    by connection -- app.py's get_db() opens a fresh connection per request,
+    so caching by connection would never hit across requests, but the
+    underlying scoring_config table is only ever written by the one-time
+    scripts/init_db.py seed script (confirmed: no live endpoint mutates it),
+    so a season-keyed cache is safe for the life of the process."""
+    if season not in _scoring_config_cache:
+        rows = conn.execute(
+            "SELECT stat, points, positions FROM scoring_config WHERE season = ?",
+            (season,)
+        ).fetchall()
+        _scoring_config_cache[season] = {stat: (points, positions.split(",")) for stat, points, positions in rows}
+    return _scoring_config_cache[season]
 
 
 def calc_minutes_points(minutes_played):
@@ -133,30 +140,29 @@ def calc_player_score(conn, player_name, match_id, position, season="2025-26"):
     # have the transferred-in player's own team, so opponent goals always
     # read as 0. Skip these three components entirely for external rows
     # rather than credit a fabricated clean sheet.
-    if not external:
-        # Goals conceded - DEF
+    if not external and pos in ("DEF", "GK"):
+        # DEF and GK share one goals-conceded lookup instead of querying it
+        # up to twice (once for the conceded-points line, once again for
+        # the clean-sheet check).
+        gc = get_team_goals_conceded(conn, match_id, club)
+
         if pos == "DEF":
-            gc = get_team_goals_conceded(conn, match_id, club)
             gc_pts = gc * config["goals_conceded"][0]
             if gc_pts != 0:
                 breakdown["goals_conceded"] = gc_pts
                 score += gc_pts
 
-        # Goals conceded - GK
         if pos == "GK":
-            gc = get_team_goals_conceded(conn, match_id, club)
             gc_pts = gc * config["gk_goals_conceded"][0]
             if gc_pts != 0:
                 breakdown["gk_goals_conceded"] = gc_pts
                 score += gc_pts
 
         # Clean sheet - DEF or GK, 60+ minutes only
-        if pos in ("DEF", "GK") and minutes_played is not None and minutes_played >= 60:
-            gc = get_team_goals_conceded(conn, match_id, club)
-            if gc == 0:
-                cs_pts = config["clean_sheet"][0]
-                breakdown["clean_sheet"] = cs_pts
-                score += cs_pts
+        if minutes_played is not None and minutes_played >= 60 and gc == 0:
+            cs_pts = config["clean_sheet"][0]
+            breakdown["clean_sheet"] = cs_pts
+            score += cs_pts
 
     return round(score, 2), breakdown
 
@@ -197,10 +203,27 @@ def calc_bulk_season_totals(conn, season, match_id_filter=None):
     if not rows:
         return {}
 
-    # Precompute goals conceded per (match_id, club) once instead of per-row.
+    # Precompute goals conceded per (match_id, club) from the rows already
+    # fetched above, entirely in Python -- avoids a get_team_goals_conceded
+    # DB round trip per unique pair (can be 1,000+ pairs across a season).
+    # Same definition as get_team_goals_conceded: opponent goals scored +
+    # this club's own goals, in the same match.
+    goals_by_match_club = {}
+    own_goals_by_match_club = {}
+    clubs_by_match = {}
+    for r in rows:
+        key = (r['match_id'], r['club'])
+        goals_by_match_club[key] = goals_by_match_club.get(key, 0) + (r['goals'] or 0)
+        own_goals_by_match_club[key] = own_goals_by_match_club.get(key, 0) + (r['own_goals'] or 0)
+        clubs_by_match.setdefault(r['match_id'], set()).add(r['club'])
+
     conceded = {}
     for match_id, club in {(r['match_id'], r['club']) for r in rows}:
-        conceded[(match_id, club)] = get_team_goals_conceded(conn, match_id, club)
+        opponent_goals = sum(
+            goals_by_match_club.get((match_id, c), 0)
+            for c in clubs_by_match[match_id] if c != club
+        )
+        conceded[(match_id, club)] = opponent_goals + own_goals_by_match_club.get((match_id, club), 0)
 
     positions = {r['name']: r['position'] for r in c.execute(
         "SELECT name, position FROM players"
@@ -294,24 +317,33 @@ def calc_team_score_for_gw(conn, manager_id, gw_number, season="2025-26"):
     total = 0.0
     breakdown = []
 
+    # One batched lookup for "which of these starters actually has stats for
+    # which of these matches" instead of a starters x matches cross-product
+    # of existence-check queries (was ~11 x ~10 = ~110 queries per call).
+    matches_by_player = {}
+    if match_ids:
+        player_names = [row[0] for row in starters]
+        p_placeholders = ','.join('?' * len(player_names))
+        m_placeholders = ','.join('?' * len(match_ids))
+        stat_rows = c.execute(f"""
+            SELECT DISTINCT player_name, match_id FROM raw_stats
+            WHERE player_name IN ({p_placeholders}) AND match_id IN ({m_placeholders})
+        """, player_names + match_ids).fetchall()
+        for r in stat_rows:
+            matches_by_player.setdefault(r['player_name'], []).append(r['match_id'])
+
     for player_name, position_slot in starters:
         player_total = 0.0
         player_matches = []
 
-        for match_id in match_ids:
-            has_stats = c.execute(
-                "SELECT 1 FROM raw_stats WHERE player_name = ? AND match_id = ?",
-                (player_name, match_id)
-            ).fetchone()
-
-            if has_stats:
-                score, detail = calc_player_score(conn, player_name, match_id, position_slot, season=season)
-                player_total += score
-                player_matches.append({
-                    "match_id": match_id,
-                    "score": score,
-                    "detail": detail
-                })
+        for match_id in matches_by_player.get(player_name, []):
+            score, detail = calc_player_score(conn, player_name, match_id, position_slot, season=season)
+            player_total += score
+            player_matches.append({
+                "match_id": match_id,
+                "score": score,
+                "detail": detail
+            })
 
         breakdown.append({
             "player": player_name,

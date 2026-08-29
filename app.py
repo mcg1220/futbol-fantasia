@@ -2444,21 +2444,12 @@ def history():
     # always the logged-in identity (or None if browsing without a session).
     as_manager_id = current_manager_id()
 
-    totals_2025 = calc_bulk_season_totals(conn, '2025-26', match_id_filter=(0, SEASON_CUTOFF))
+    # compute_full_player_stats's totals_2025/eligibility_by_player are the
+    # exact same computation this route used to also run separately (a
+    # ~2,500-query calc_bulk_season_totals pass, run twice for nothing) --
+    # call it once and reuse everything it returns.
+    totals_2025, eligibility_by_player, stat_sums_2025, _projections = compute_full_player_stats(conn)
     totals_2026 = calc_bulk_season_totals(conn, '2026-27', match_id_filter=(SEASON_CUTOFF, 9_999_999))
-
-    elig_rows = c.execute("""
-        SELECT p.name, pe.position FROM players p
-        JOIN player_eligibility pe ON pe.player_id = p.id
-    """).fetchall()
-    eligibility_by_player = {}
-    for r in elig_rows:
-        eligibility_by_player.setdefault(r['name'], []).append(r['position'])
-
-    # Full 2025-26 raw-stat breakdown per player (goals, assists, tackles,
-    # etc.) — not shown as columns on this page, only carried through as
-    # hidden per-row data for the CSV export (see STAT_COLS/browse-row).
-    _, _, stat_sums_2025, _ = compute_full_player_stats(conn)
 
     # Players with no club (or at a relegated club) aren't in the current PL
     # player pool — exclude from browse, but their historical stats remain.
