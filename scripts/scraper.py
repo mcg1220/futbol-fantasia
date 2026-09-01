@@ -231,6 +231,7 @@ def scrape_team_tab(page, container_id, club, players):
                 if player_id:
                     players[name]["player_id"] = player_id
 
+                started_on_bench = False
                 meta = row.locator(".player-meta-data").all()
                 for m in meta:
                     txt = m.inner_text().strip().strip(",").strip()
@@ -240,17 +241,28 @@ def scrape_team_tab(page, container_id, club, players):
                         if txt == "GK" and player_id:
                             KNOWN_GK_IDS.add(player_id)
                         break
-                    elif txt == "Sub" and player_id and player_id in KNOWN_GK_IDS:
-                        players[name]["position"] = "GK"
+                    elif txt == "Sub":
+                        started_on_bench = True
+                        if player_id and player_id in KNOWN_GK_IDS:
+                            players[name]["position"] = "GK"
                         break
             except:
-                pass
+                started_on_bench = False
 
             try:
                 row_html = row.inner_html(timeout=2000)
                 parse_incidents(row_html, players[name])
             except:
                 pass
+
+            # "Sub" with no sub-on incident means they started on the bench
+            # and never actually entered the match -- empty_player()'s 90-
+            # minute default is meant for players who played the full match
+            # uninterrupted, not for an unused substitute. Force them to 0
+            # so they don't wrongly earn/lose points (e.g. a goals-conceded
+            # penalty) for a match they never took part in.
+            if started_on_bench and players[name].get("sub_on_min", 0) == 0:
+                players[name]["minutes_played"] = 0
 
             cells = row.locator("td").all()
             for cell in cells:
