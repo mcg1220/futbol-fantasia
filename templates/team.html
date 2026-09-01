@@ -114,7 +114,7 @@
 </div>
 
 <!-- ── Roster macro ──────────────────────────────────────────────────────── -->
-{% macro roster_table(players, show_pos_groups, id_prefix, table_id) %}
+{% macro roster_table(players, show_pos_groups, id_prefix, table_id, show_total_row=False) %}
 {% if players %}
 <div class="table-actions">
   <button class="action-btn" onclick="toggleAll('{{ table_id }}')">⊞ Expand / Collapse All</button>
@@ -144,7 +144,7 @@
       </tr>
     </thead>
     <tbody>
-      {% set ns = namespace(cur_pos='') %}
+      {% set ns = namespace(cur_pos='', total_pts=0) %}
       {% for player in players %}
         {% set pos = (player.position_slot or '')|upper %}
         {% set is_gk      = pos == 'GK' %}
@@ -160,6 +160,7 @@
         {% set kickoff = kickoff_map.get(club) if club else None %}
         {% set s    = stats_map.get(player.player_name) %}
         {% set pts  = points_map.get(player.player_name, {'gw_score':0,'season_total':0,'season_avg':0}) %}
+        {% set ns.total_pts = ns.total_pts + pts.gw_score %}
         {% set uid  = id_prefix ~ '-' ~ loop.index %}
         {% set eligible = eligibility_map.get(player.player_name) %}
         {% set player_locked = locked_map.get(player.player_name, False) %}
@@ -333,6 +334,19 @@
           </td>
         </tr>
       {% endfor %}
+      {% if show_total_row and players %}
+      {% set avg_pts = (ns.total_pts / players|length) if players|length else 0 %}
+      <tr class="total-row">
+        <td colspan="6" style="text-align:right;font-weight:700">Starting XI Total</td>
+        <td class="pts-cell" style="font-weight:700">
+          {{ "%.2f"|format(ns.total_pts) }}
+          <div class="pts-avg-note" title="Average points per starter this gameweek">avg {{ "%.2f"|format(avg_pts) }}</div>
+        </td>
+        <td colspan="4"></td>
+        <td class="season-col" colspan="2"></td>
+        <td></td>
+      </tr>
+      {% endif %}
     </tbody>
   </table>
 </div>
@@ -486,7 +500,7 @@
   </div>
   {% endif %}
 
-  {{ roster_table(starters, True, 's', 'table-starters') }}
+  {{ roster_table(starters, True, 's', 'table-starters', show_total_row=True) }}
 </section>
 
 <!-- ── Bench ─────────────────────────────────────────────────────────────── -->

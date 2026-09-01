@@ -114,6 +114,19 @@
       </div>
     </div>
     {% endfor %}
+    <div class="matchup-vs-row matchup-vs-total-row">
+      <div class="matchup-vs-player mv-left"><span class="matchup-vs-name">Starting XI Total</span></div>
+      <span class="matchup-vs-pts mv-left">
+        {{ "%.2f"|format(starters_a_total) }}
+        <span class="matchup-vs-opp text-muted-cell" style="display:block">avg {{ "%.2f"|format(starters_a_avg) }}</span>
+      </span>
+      <span class="matchup-vs-pos pos-badge">TOT</span>
+      <span class="matchup-vs-pts mv-right">
+        {{ "%.2f"|format(starters_b_total) }}
+        <span class="matchup-vs-opp text-muted-cell" style="display:block">avg {{ "%.2f"|format(starters_b_avg) }}</span>
+      </span>
+      <div class="matchup-vs-player mv-right"><span class="matchup-vs-name">Starting XI Total</span></div>
+    </div>
   </div>
 </section>
 

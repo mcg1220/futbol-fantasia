@@ -1988,6 +1988,14 @@ def matchup_detail(matchup_id):
     side_a = build_side(mu['team_a_id'])
     side_b = build_side(mu['team_b_id'])
 
+    # Starting XI total/average for this gw alone -- the row shown after
+    # the GK row on the page, same "how good was my lineup this week"
+    # snapshot as the Team page's roster table.
+    starters_a_total = round(sum(r['gw_score'] for r in side_a['starters']), 2)
+    starters_a_avg = round(starters_a_total / len(side_a['starters']), 2) if side_a['starters'] else 0.0
+    starters_b_total = round(sum(r['gw_score'] for r in side_b['starters']), 2)
+    starters_b_avg = round(starters_b_total / len(side_b['starters']), 2) if side_b['starters'] else 0.0
+
     # One row per fantasy starting slot (2 FW, 4 MID, 4 DEF, 1 GK), pairing
     # both teams' Nth player at that position -- blank if a side is short.
     paired_starters = []
@@ -2011,6 +2019,8 @@ def matchup_detail(matchup_id):
         win_b=mu['b_win'], loss_b=mu['b_loss'], tie_b=mu['b_tie'],
         live_score_a=live_score_a, live_score_b=live_score_b,
         paired_starters=paired_starters,
+        starters_a_total=starters_a_total, starters_a_avg=starters_a_avg,
+        starters_b_total=starters_b_total, starters_b_avg=starters_b_avg,
         bench_a=side_a['bench'], bench_b=side_b['bench'],
         ir_a=side_a['ir'], ir_b=side_b['ir'],
     )
