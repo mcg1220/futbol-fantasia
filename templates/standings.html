@@ -17,6 +17,7 @@
           <th class="col-stat">L</th>
           <th class="col-stat">T</th>
           <th class="col-stat">PF</th>
+          <th class="col-stat" title="Average points for, per gameweek played">Avg</th>
           <th class="col-stat">PA</th>
           <th class="col-stat">DIFF</th>
         </tr>
@@ -24,6 +25,7 @@
       <tbody>
         {% for row in standings %}
         {% set diff = row.pts_for - row.pts_against %}
+        {% set games_played = row.wins + row.losses + row.ties %}
         <tr {% if loop.index == 4 %}class="playoff-cutoff"{% endif %}>
           <td class="col-rank rank-num">{{ loop.index }}</td>
           <td class="col-team">
@@ -43,6 +45,7 @@
           <td class="col-stat stat-loss">{{ row.losses }}</td>
           <td class="col-stat">{{ row.ties }}</td>
           <td class="col-stat">{{ "%.2f"|format(row.pts_for) }}</td>
+          <td class="col-stat">{{ "%.2f"|format(row.pts_for / games_played) if games_played else '—' }}</td>
           <td class="col-stat">{{ "%.2f"|format(row.pts_against) }}</td>
           <td class="col-stat diff {% if diff > 0 %}diff-pos{% elif diff < 0 %}diff-neg{% endif %}">
             {% if diff > 0 %}+{% endif %}{{ "%.2f"|format(diff) }}
