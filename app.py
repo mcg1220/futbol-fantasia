@@ -4714,6 +4714,7 @@ def transfer_current_pool_query(conn, draft_type, round_num):
     # Curated rows win on name collision (they carry previous_club); a
     # dict keyed by name is a simple union since general_rows is populated
     # first and curated_rows overwrites any duplicate.
+    curated_names = {r['name'] for r in curated_rows}
     rows_by_name = {r['name']: r for r in general_rows}
     rows_by_name.update({r['name']: r for r in curated_rows})
 
@@ -4734,6 +4735,11 @@ def transfer_current_pool_query(conn, draft_type, round_num):
             'proj_total': proj.get('proj_total'),
             'proj_avg': proj.get('proj_avg'),
             'stats': stat_sums.get(name, {}),
+            # True only for the commissioner-curated list (this summer's
+            # actual transfers-in) -- not the general unrostered players
+            # the pool was widened to include, so the UI can visually tell
+            # the two apart now that they're shown together.
+            'is_transfer': name in curated_names,
         })
     return out
 

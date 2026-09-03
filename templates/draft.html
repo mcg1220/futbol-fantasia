@@ -956,11 +956,11 @@ function renderTransferInProgress(type, label, data) {
   const poolRows = data.current_pool.map(p => {
     const statCells = STAT_COLS.map(([key]) => `<td>${p.stats[key] || 0}</td>`).join('');
     return `
-      <tr>
+      <tr class="${p.is_transfer ? 'pool-row-transfer' : ''}" data-name="${p.name.toLowerCase()}" data-club="${(p.club || '').toLowerCase()}">
         <td class="pool-action-cell pool-sticky-col pool-sticky-0">
           <button type="button" class="action-btn" onclick="startTransferPick('${type}', '${p.name.replace(/'/g, "\\'")}', ${onClockId})">Pick</button>
         </td>
-        <td style="text-align:left;font-weight:600" class="pool-sticky-col pool-sticky-1">${p.name}</td>
+        <td style="text-align:left;font-weight:600" class="pool-sticky-col pool-sticky-1">${p.is_transfer ? '<span class="transfer-in-badge" title="Transferred in this window">🔁</span> ' : ''}${p.name}</td>
         <td style="text-align:left" class="pool-sticky-col pool-sticky-2">${clubCellHtml(p)}</td>
         <td style="text-align:left" class="pool-sticky-col pool-sticky-3">${p.eligibility.map(pos => `<span class="pos-badge">${pos}</span>`).join('')}</td>
         <td>${p.pts_2025_26.toFixed(2)}</td>
@@ -979,6 +979,10 @@ function renderTransferInProgress(type, label, data) {
     </div>
     ${renderTransferMatrix(type, data.order_round1, data.picks, data.round, onClockId, data.order_round0)}
     <div class="table-wrap pool-table-wrap">
+      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 20px 0">
+        <input type="text" id="transfer-${type}-search" class="player-search-input" placeholder="Filter by name or club..." oninput="filterTransferPool('${type}')" style="min-width:220px" />
+        <span style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted)"><span class="transfer-in-badge">🔁</span> = transferred in this window</span>
+      </div>
       <table class="data-table pool-table-sticky" id="transfer-${type}-pool-table">
         <thead>
           <tr>
@@ -996,6 +1000,18 @@ function renderTransferInProgress(type, label, data) {
         <tbody>${poolRows}</tbody>
       </table>
     </div>`;
+}
+
+function filterTransferPool(type) {
+  const q = document.getElementById(`transfer-${type}-search`).value.trim().toLowerCase();
+  const table = document.getElementById(`transfer-${type}-pool-table`);
+  if (!table) return;
+  table.querySelectorAll('tbody tr').forEach(row => {
+    const name = row.getAttribute('data-name');
+    if (name === null) return; // the "No players available" placeholder row
+    const club = row.getAttribute('data-club') || '';
+    row.style.display = (!q || name.includes(q) || club.includes(q)) ? '' : 'none';
+  });
 }
 
 const transferSortState = {};

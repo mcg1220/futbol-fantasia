@@ -262,6 +262,9 @@ body {
 .pool-table-sticky tbody tr:hover td.pool-sticky-col { background: var(--bg-thead); }
 .pool-row-mine td { background: var(--pl-green-bg); }
 .pool-row-mine td.pool-sticky-col { background: var(--pl-green-bg); }
+.pool-row-transfer td { background: var(--pl-magenta-bg); }
+.pool-row-transfer td.pool-sticky-col { background: var(--pl-magenta-bg); }
+.transfer-in-badge { font-size: 12px; }
 .pool-sticky-0 { left: 0px;   width: 70px;  min-width: 70px;  max-width: 70px; }
 .pool-sticky-1 { left: 70px;  width: 170px; min-width: 170px; max-width: 170px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pool-sticky-2 { left: 240px; width: 140px; min-width: 140px; max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
