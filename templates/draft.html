@@ -835,7 +835,7 @@ async function renderTransferDraft(type) {
     root.innerHTML = renderTransferInProgress(type, label, data);
     sortTransferPool(type, 4, 'desc');
   } else {
-    root.innerHTML = renderTransferComplete(type, label, data.picks, data.order_round1);
+    root.innerHTML = renderTransferComplete(type, label, data.picks, data.order_round1, data.order_round0);
   }
 }
 
@@ -892,7 +892,7 @@ const TRANSFER_ROUND_ORDER_DESC = {
   },
 };
 
-function renderTransferMatrix(type, orderRound1, picks, currentRound, currentManagerId) {
+function renderTransferMatrix(type, orderRound1, picks, currentRound, currentManagerId, orderRound0) {
   const cols = orderRound1;
   const headerCells = cols.map(m => `
     <th>
@@ -902,7 +902,7 @@ function renderTransferMatrix(type, orderRound1, picks, currentRound, currentMan
       </div>
     </th>`).join('');
 
-  const rowHtml = (round, arrow) => {
+  const rowHtml = (round, arrow, label) => {
     const cells = cols.map(m => {
       const pick = picks.find(p => p.round === round && p.manager_id === m.manager_id);
       const isCurrent = round === currentRound && m.manager_id === currentManagerId;
@@ -914,33 +914,40 @@ function renderTransferMatrix(type, orderRound1, picks, currentRound, currentMan
         : '';
       return `<td class="${classes.join(' ')}">${content}</td>`;
     }).join('');
-    return `<tr><td class="snake-round-label">R${round} ${arrow}</td>${cells}</tr>`;
+    return `<tr><td class="snake-round-label">${label || `R${round} ${arrow}`}</td>${cells}</tr>`;
   };
 
   const desc = TRANSFER_ROUND_ORDER_DESC[type] || {};
   const dividerRow = `<tr><td colspan="${cols.length + 1}" class="transfer-matrix-divider">Round 2 uses a different order — see above</td></tr>`;
+  const hasBonus = !!(orderRound0 && orderRound0.length);
+  const bonusRow = hasBonus ? rowHtml(0, '★', '🎁 Bonus →') : '';
+  const bonusDivider = hasBonus
+    ? `<tr><td colspan="${cols.length + 1}" class="transfer-matrix-divider">Bonus pick — compensation for a player transferred out before the deadline</td></tr>`
+    : '';
 
   return `
     <div class="table-wrap" style="padding:16px 20px;margin-bottom:14px">
       <h3 style="margin-top:0;margin-bottom:4px">📋 Pick Matrix</h3>
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;display:flex;flex-direction:column;gap:2px">
+        ${hasBonus ? '<span><strong>Bonus pick order:</strong> Compensation for an early transfer-out — picks before Round 1</span>' : ''}
         <span><strong>Round 1 order:</strong> ${desc[1] || '—'}</span>
         <span><strong>Round 2 order:</strong> ${desc[2] || '—'}</span>
       </div>
       <div class="snake-matrix-wrap">
         <table class="snake-matrix">
           <thead><tr><th class="snake-round-label"></th>${headerCells}</tr></thead>
-          <tbody>${rowHtml(1, '→')}${dividerRow}${rowHtml(2, '→')}</tbody>
+          <tbody>${bonusRow}${bonusDivider}${rowHtml(1, '→')}${dividerRow}${rowHtml(2, '→')}</tbody>
         </table>
       </div>
     </div>`;
 }
 
 function renderTransferInProgress(type, label, data) {
-  const order = data.round === 1 ? data.order_round1 : data.order_round2;
+  const order = data.round === 0 ? data.order_round0 : (data.round === 1 ? data.order_round1 : data.order_round2);
   const onClock = order.find(o => o.position === data.current_pick_number);
   const onClockName = onClock ? `${onClock.name} — ${onClock.team_name}` : '—';
   const onClockId = onClock ? onClock.manager_id : null;
+  const roundLabel = data.round === 0 ? '🎁 Bonus Pick' : `Round ${data.round} of 2`;
 
   const statHeaders = STAT_COLS.map(([key, label, title], i) =>
     `<th class="sortable" data-type="num" onclick="sortTransferPool('${type}', ${8 + i})" title="2025-26 total ${title}">${label}</th>`
@@ -966,11 +973,11 @@ function renderTransferInProgress(type, label, data) {
 
   return `
     <div class="table-wrap" style="padding:16px 20px;margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-      <strong>Round ${data.round} of 2</strong>
+      <strong>${roundLabel}</strong>
       <span>On the clock: <strong>${onClockName}</strong></span>
       ${onClockId ? `<button type="button" class="action-btn" onclick="passTransferPick('${type}', ${onClockId})">Pass</button>` : ''}
     </div>
-    ${renderTransferMatrix(type, data.order_round1, data.picks, data.round, onClockId)}
+    ${renderTransferMatrix(type, data.order_round1, data.picks, data.round, onClockId, data.order_round0)}
     <div class="table-wrap pool-table-wrap">
       <table class="data-table pool-table-sticky" id="transfer-${type}-pool-table">
         <thead>
@@ -1024,17 +1031,19 @@ function sortTransferPool(type, colIndex, forceDir) {
   th.classList.add(asc ? 'sort-asc' : 'sort-desc');
 }
 
-function renderTransferComplete(type, label, picks, orderRound1) {
-  const roundBlock = (round) => {
+function renderTransferComplete(type, label, picks, orderRound1, orderRound0) {
+  const roundBlock = (round, heading) => {
     const rows = picks.filter(p => p.round === round).map(p => `
       <tr>
         <td>${p.overall_pick}</td>
         <td style="text-align:left">${p.manager_name} — ${p.team_name}</td>
         <td style="text-align:left">${p.is_pass ? 'Passed' : `+ ${p.player_name} <span style="color:var(--text-muted)">(dropped ${p.dropped_player})</span>`}</td>
       </tr>`).join('') || '<tr><td colspan="3" style="color:var(--text-muted)">No picks recorded.</td></tr>';
-    return `<h4>Round ${round}</h4><table class="data-table"><thead><tr><th>#</th><th style="text-align:left">Manager</th><th style="text-align:left">Result</th></tr></thead><tbody>${rows}</tbody></table>`;
+    return `<h4>${heading}</h4><table class="data-table"><thead><tr><th>#</th><th style="text-align:left">Manager</th><th style="text-align:left">Result</th></tr></thead><tbody>${rows}</tbody></table>`;
   };
-  return `<div class="table-wrap" style="padding:20px"><h3 style="margin-top:0">🏁 ${label} Transfer Draft — Complete</h3>${roundBlock(1)}<div style="margin-top:18px">${roundBlock(2)}</div></div>${renderTransferMatrix(type, orderRound1, picks, null, null)}`;
+  const hasBonus = picks.some(p => p.round === 0);
+  const bonusBlock = hasBonus ? `<div style="margin-bottom:18px">${roundBlock(0, '🎁 Bonus Pick')}</div>` : '';
+  return `<div class="table-wrap" style="padding:20px"><h3 style="margin-top:0">🏁 ${label} Transfer Draft — Complete</h3>${bonusBlock}${roundBlock(1, 'Round 1')}<div style="margin-top:18px">${roundBlock(2, 'Round 2')}</div></div>${renderTransferMatrix(type, orderRound1, picks, null, null, orderRound0)}`;
 }
 
 async function addExistingToPool(type) {

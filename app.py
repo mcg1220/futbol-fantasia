@@ -4687,33 +4687,38 @@ def get_transfer_pool(conn, season, draft_type):
 
 
 def transfer_current_pool_query(conn, draft_type, round_num):
-    """Round 1 offers only the commissioner-curated transfer_pool; round 2
-    opens up to any currently-unrostered player league-wide (including
-    anyone dropped earlier in round 1 of this same draft). Both rounds carry
-    the same full stat columns as the Main Draft pool table."""
+    """Every round offers the same pool: the commissioner-curated
+    transfer_pool for this draft_type/season, unioned with any currently-
+    unrostered player league-wide (round_num is kept as a parameter for
+    the existing call sites but no longer changes which pool is offered --
+    Round 1 used to be curated-only, but that meant a compensation pick
+    inserted ahead of Round 1 had nothing but the curated list to draw
+    from; opening both rounds up equally is simpler and fairer for
+    everyone, not just a bonus pick)."""
     season = DRAFT_SEASON
     owner_map = get_owner_map(conn, season, get_current_gw(conn, season))
     totals_2025, eligibility_by_player, stat_sums, projections = compute_full_player_stats(conn)
 
-    if round_num == 1:
-        rows = conn.execute("""
-            SELECT tp.player_name AS name, p.club, p.position, tp.previous_club
-            FROM transfer_pool tp JOIN players p ON p.name = tp.player_name
-            WHERE tp.season=? AND tp.draft_type=?
-            ORDER BY tp.player_name
-        """, (season, draft_type)).fetchall()
-    else:
-        rows = conn.execute(f"""
-            SELECT p.name, p.club, p.position, NULL AS previous_club FROM players p
-            WHERE p.club IS NOT NULL AND p.club != ''
-              AND p.club NOT IN ({','.join('?' * len(RELEGATED_CLUBS))})
-              AND p.draftable = 1
-            ORDER BY p.name
-        """, RELEGATED_CLUBS).fetchall()
+    curated_rows = conn.execute("""
+        SELECT tp.player_name AS name, p.club, p.position, tp.previous_club
+        FROM transfer_pool tp JOIN players p ON p.name = tp.player_name
+        WHERE tp.season=? AND tp.draft_type=?
+    """, (season, draft_type)).fetchall()
+    general_rows = conn.execute(f"""
+        SELECT p.name, p.club, p.position, NULL AS previous_club FROM players p
+        WHERE p.club IS NOT NULL AND p.club != ''
+          AND p.club NOT IN ({','.join('?' * len(RELEGATED_CLUBS))})
+          AND p.draftable = 1
+    """, RELEGATED_CLUBS).fetchall()
+
+    # Curated rows win on name collision (they carry previous_club); a
+    # dict keyed by name is a simple union since general_rows is populated
+    # first and curated_rows overwrites any duplicate.
+    rows_by_name = {r['name']: r for r in general_rows}
+    rows_by_name.update({r['name']: r for r in curated_rows})
 
     out = []
-    for r in rows:
-        name = r['name']
+    for name, r in sorted(rows_by_name.items()):
         if name in owner_map:
             continue
         s25 = totals_2025.get(name, {'total': 0.0, 'avg': 0.0})
@@ -4912,7 +4917,21 @@ def transfer_draft_start(draft_type):
         if len(round2) < DRAFT_TEAMS:
             return jsonify({"error": "Waiver order isn't set up yet — open at least one waiver window first."}), 409
 
+        # Compensation picks -- a manager who lost an early Main Draft pick
+        # to a Premier League departure, manually flagged in
+        # transfer_draft_bonus_picks (see that table's migration for why
+        # this isn't auto-detected) -- go in as round 0, ahead of Round 1.
+        round0 = [r[0] for r in conn.execute("""
+            SELECT manager_id FROM transfer_draft_bonus_picks
+            WHERE season=? AND draft_type=? ORDER BY created_at ASC
+        """, (season, draft_type)).fetchall()]
+
         conn.execute("DELETE FROM transfer_draft_order WHERE transfer_draft_id=?", (draft['id'],))
+        for i, manager_id in enumerate(round0, start=1):
+            conn.execute(
+                "INSERT INTO transfer_draft_order (transfer_draft_id, round, position, manager_id) VALUES (?,0,?,?)",
+                (draft['id'], i, manager_id)
+            )
         for i, manager_id in enumerate(round1, start=1):
             conn.execute(
                 "INSERT INTO transfer_draft_order (transfer_draft_id, round, position, manager_id) VALUES (?,1,?,?)",
@@ -4924,9 +4943,10 @@ def transfer_draft_start(draft_type):
                 (draft['id'], i, manager_id)
             )
 
+        start_round = 0 if round0 else 1
         conn.execute(
-            "UPDATE transfer_drafts SET status='in_progress', round=1, current_pick_number=1, started_at=? WHERE id=?",
-            (now_eastern_naive().isoformat(), draft['id'])
+            "UPDATE transfer_drafts SET status='in_progress', round=?, current_pick_number=1, started_at=? WHERE id=?",
+            (start_round, now_eastern_naive().isoformat(), draft['id'])
         )
         log_audit(conn, None, 'transfer_draft', 'start', f"Started the {draft_type} transfer draft")
         conn.commit()
@@ -4940,10 +4960,23 @@ def transfer_draft_start(draft_type):
 
 
 def transfer_draft_advance(conn, draft):
-    """Move current_pick_number forward; roll from round 1 into round 2;
-    mark complete after round 2's last turn."""
+    """Move current_pick_number forward; roll from round 0 (compensation
+    picks, if any -- see transfer_draft_bonus_picks) into round 1, then
+    round 1 into round 2; mark complete after round 2's last turn. Round
+    0's size varies (however many compensation picks exist this draft, if
+    any), so it's counted dynamically rather than compared against the
+    fixed DRAFT_TEAMS used for rounds 1/2."""
     next_pick = draft['current_pick_number'] + 1
-    if draft['round'] == 1 and next_pick > DRAFT_TEAMS:
+    if draft['round'] == 0:
+        round0_size = conn.execute(
+            "SELECT COUNT(*) FROM transfer_draft_order WHERE transfer_draft_id=? AND round=0",
+            (draft['id'],)
+        ).fetchone()[0]
+        if next_pick > round0_size:
+            new_round, new_pick, new_status = 1, 1, 'in_progress'
+        else:
+            new_round, new_pick, new_status = 0, next_pick, 'in_progress'
+    elif draft['round'] == 1 and next_pick > DRAFT_TEAMS:
         new_round, new_pick, new_status = 2, 1, 'in_progress'
     elif draft['round'] == 2 and next_pick > DRAFT_TEAMS:
         new_round, new_pick, new_status = 2, draft['current_pick_number'], 'complete'
@@ -4990,7 +5023,13 @@ def transfer_draft_pick(draft_type):
         if not ok:
             return jsonify(info), 409
 
-        overall_pick = (draft['round'] - 1) * DRAFT_TEAMS + draft['current_pick_number']
+        # Round 0 (compensation picks) uses a large negative offset so it
+        # always sorts before every round 1/2 pick regardless of how many
+        # compensation picks exist -- round 1 pick 1 is already
+        # overall_pick=1, so round 0 can't just start counting from 1 too
+        # without colliding.
+        overall_pick = draft['current_pick_number'] - 1000 if draft['round'] == 0 \
+            else (draft['round'] - 1) * DRAFT_TEAMS + draft['current_pick_number']
         conn.execute("""
             INSERT INTO transfer_draft_picks (transfer_draft_id, round, overall_pick, manager_id, player_name, dropped_player, is_pass, picked_at)
             VALUES (?,?,?,?,?,?,0,?)
@@ -5039,7 +5078,11 @@ def transfer_draft_pass(draft_type):
         if not expected or int(manager_id) != expected['manager_id']:
             return jsonify({"error": "It's not your turn to pick."}), 409
 
-        overall_pick = (draft['round'] - 1) * DRAFT_TEAMS + draft['current_pick_number']
+        # Same round-0 offset as transfer_draft_pick, so a pass and a pick
+        # within round 0 still sort in true turn order (both use the same
+        # -1000 scheme, rather than a pass landing near round 1's numbering).
+        overall_pick = draft['current_pick_number'] - 1000 if draft['round'] == 0 \
+            else (draft['round'] - 1) * DRAFT_TEAMS + draft['current_pick_number']
         conn.execute("""
             INSERT INTO transfer_draft_picks (transfer_draft_id, round, overall_pick, manager_id, player_name, dropped_player, is_pass, picked_at)
             VALUES (?,?,?,?,NULL,NULL,1,?)
@@ -5066,6 +5109,7 @@ def transfer_draft_state(draft_type):
     season = DRAFT_SEASON
     draft = get_transfer_draft(conn, season, draft_type)
     pool = get_transfer_pool(conn, season, draft_type)
+    order0 = get_transfer_draft_order(conn, draft['id'], 0)
     order1 = get_transfer_draft_order(conn, draft['id'], 1)
     order2 = get_transfer_draft_order(conn, draft['id'], 2)
     current_pool = transfer_current_pool_query(conn, draft_type, draft['round']) if draft['status'] == 'in_progress' else []
@@ -5081,6 +5125,7 @@ def transfer_draft_state(draft_type):
         "round": draft['round'],
         "current_pick_number": draft['current_pick_number'],
         "pool": pool,
+        "order_round0": order0,
         "order_round1": order1,
         "order_round2": order2,
         "current_pool": current_pool,
