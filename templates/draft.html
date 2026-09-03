@@ -833,7 +833,7 @@ async function renderTransferDraft(type) {
     root.innerHTML = renderTransferNotStarted(type, label, data.pool);
   } else if (data.status === 'in_progress') {
     root.innerHTML = renderTransferInProgress(type, label, data);
-    sortTransferPool(type, 4, 'desc');
+    defaultSortTransferPool(type);
   } else {
     root.innerHTML = renderTransferComplete(type, label, data.picks, data.order_round1, data.order_round0);
   }
@@ -950,7 +950,7 @@ function renderTransferInProgress(type, label, data) {
   const roundLabel = data.round === 0 ? '🎁 Bonus Pick' : `Round ${data.round} of 2`;
 
   const statHeaders = STAT_COLS.map(([key, label, title], i) =>
-    `<th class="sortable" data-type="num" onclick="sortTransferPool('${type}', ${8 + i})" title="2025-26 total ${title}">${label}</th>`
+    `<th class="sortable" data-type="num" onclick="sortTransferPool('${type}', ${10 + i})" title="2025-26 total ${title}">${label}</th>`
   ).join('');
 
   const poolRows = data.current_pool.map(p => {
@@ -965,11 +965,13 @@ function renderTransferInProgress(type, label, data) {
         <td style="text-align:left" class="pool-sticky-col pool-sticky-3">${p.eligibility.map(pos => `<span class="pos-badge">${pos}</span>`).join('')}</td>
         <td>${p.pts_2025_26.toFixed(2)}</td>
         <td>${p.avg_2025_26.toFixed(2)}</td>
+        <td>${p.pts_2026_27.toFixed(2)}</td>
+        <td>${p.avg_2026_27.toFixed(2)}</td>
         <td>${p.proj_total != null ? p.proj_total.toFixed(2) : '—'}</td>
         <td>${p.proj_avg != null ? p.proj_avg.toFixed(2) : '—'}</td>
         ${statCells}
       </tr>`;
-  }).join('') || `<tr><td colspan="${8 + STAT_COLS.length}" style="color:var(--text-muted)">No players available this round.</td></tr>`;
+  }).join('') || `<tr><td colspan="${10 + STAT_COLS.length}" style="color:var(--text-muted)">No players available this round.</td></tr>`;
 
   return `
     <div class="table-wrap" style="padding:16px 20px;margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
@@ -979,7 +981,7 @@ function renderTransferInProgress(type, label, data) {
     </div>
     ${renderTransferMatrix(type, data.order_round1, data.picks, data.round, onClockId, data.order_round0)}
     <div class="table-wrap pool-table-wrap">
-      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 20px 0">
+      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 20px 16px">
         <input type="text" id="transfer-${type}-search" class="player-search-input" placeholder="Filter by name or club..." oninput="filterTransferPool('${type}')" style="min-width:220px" />
         <span style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted)"><span class="transfer-in-badge">🔁</span> = transferred in this window</span>
       </div>
@@ -992,8 +994,10 @@ function renderTransferInProgress(type, label, data) {
             <th class="pool-sticky-col pool-sticky-3" style="text-align:left">Eligible</th>
             <th class="sortable" data-type="num" onclick="sortTransferPool('${type}', 4)">2025–26 FPts</th>
             <th class="sortable" data-type="num" onclick="sortTransferPool('${type}', 5)">2025–26 Avg</th>
-            <th class="sortable" data-type="num" onclick="sortTransferPool('${type}', 6)" title="2026-27 projected total points">Proj FPts</th>
-            <th class="sortable" data-type="num" onclick="sortTransferPool('${type}', 7)" title="2026-27 projected average points">Proj Avg</th>
+            <th class="sortable" data-type="num" onclick="sortTransferPool('${type}', 6)" title="2026-27 actual points so far">2026–27 FPts</th>
+            <th class="sortable" data-type="num" onclick="sortTransferPool('${type}', 7)" title="2026-27 actual average so far">2026–27 Avg</th>
+            <th class="sortable" data-type="num" onclick="sortTransferPool('${type}', 8)" title="2026-27 projected total points">Proj FPts</th>
+            <th class="sortable" data-type="num" onclick="sortTransferPool('${type}', 9)" title="2026-27 projected average points">Proj Avg</th>
             ${statHeaders}
           </tr>
         </thead>
@@ -1012,6 +1016,25 @@ function filterTransferPool(type) {
     const club = row.getAttribute('data-club') || '';
     row.style.display = (!q || name.includes(q) || club.includes(q)) ? '' : 'none';
   });
+}
+
+function defaultSortTransferPool(type) {
+  // Curated transfers-in first (that's the whole point of this draft),
+  // then by 2025-26 FPts descending within each group -- same secondary
+  // ordering the table used before transfers got a priority tier.
+  const table = document.getElementById(`transfer-${type}-pool-table`);
+  if (!table) return;
+  const tbody = table.querySelector('tbody');
+  const rows = Array.from(tbody.querySelectorAll('tr'));
+  rows.sort((a, b) => {
+    const aTransfer = a.classList.contains('pool-row-transfer') ? 1 : 0;
+    const bTransfer = b.classList.contains('pool-row-transfer') ? 1 : 0;
+    if (aTransfer !== bTransfer) return bTransfer - aTransfer;
+    const aVal = parseFloat(a.children[4]?.textContent) || 0;
+    const bVal = parseFloat(b.children[4]?.textContent) || 0;
+    return bVal - aVal;
+  });
+  rows.forEach(r => tbody.appendChild(r));
 }
 
 const transferSortState = {};

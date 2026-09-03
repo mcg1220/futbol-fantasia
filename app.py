@@ -4698,6 +4698,12 @@ def transfer_current_pool_query(conn, draft_type, round_num):
     season = DRAFT_SEASON
     owner_map = get_owner_map(conn, season, get_current_gw(conn, season))
     totals_2025, eligibility_by_player, stat_sums, projections = compute_full_player_stats(conn)
+    # Actual 2026-27 output so far -- distinct from proj_total/proj_avg
+    # (a pre-season projection) and from pts_2025_26 (last season, which a
+    # brand-new-to-the-Premier-League transfer never has). Matters most for
+    # exactly those transfers: once they've played a match or two for their
+    # new club, this is the only real signal of current form.
+    totals_2026 = calc_bulk_season_totals(conn, '2026-27', match_id_filter=(SEASON_CUTOFF, 9_999_999))
 
     curated_rows = conn.execute("""
         SELECT tp.player_name AS name, p.club, p.position, tp.previous_club
@@ -4723,6 +4729,7 @@ def transfer_current_pool_query(conn, draft_type, round_num):
         if name in owner_map:
             continue
         s25 = totals_2025.get(name, {'total': 0.0, 'avg': 0.0})
+        s26 = totals_2026.get(name, {'total': 0.0, 'avg': 0.0})
         proj = projections.get(name, {})
         out.append({
             'name': name,
@@ -4732,6 +4739,8 @@ def transfer_current_pool_query(conn, draft_type, round_num):
             'eligibility': sorted(eligibility_by_player.get(name) or ([r['position']] if r['position'] else [])),
             'pts_2025_26': s25['total'],
             'avg_2025_26': s25['avg'],
+            'pts_2026_27': s26['total'],
+            'avg_2026_27': s26['avg'],
             'proj_total': proj.get('proj_total'),
             'proj_avg': proj.get('proj_avg'),
             'stats': stat_sums.get(name, {}),
