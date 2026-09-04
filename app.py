@@ -3171,6 +3171,18 @@ def check_ir_eligibility(conn, manager_id, gw, season=DRAFT_SEASON):
     if not row:
         return {'ok': True, 'player_name': None, 'club': None}
 
+    # Manually-curated, one-off exception for a specific manager/player/gw
+    # -- see ir_eligibility_overrides' migration for why this can't be
+    # solved generically (a genuine re-injury during the very match that
+    # would otherwise "prove" they're fine looks identical in the data to
+    # real IR abuse).
+    override = conn.execute("""
+        SELECT 1 FROM ir_eligibility_overrides
+        WHERE season=? AND manager_id=? AND player_name=? AND gw=?
+    """, (season, manager_id, row['player_name'], gw)).fetchone()
+    if override:
+        return {'ok': True, 'player_name': row['player_name'], 'club': row['club']}
+
     was_on_ir_last_gw = conn.execute("""
         SELECT 1 FROM rosters
         WHERE manager_id=? AND player_name=? AND slot_type='ir'
