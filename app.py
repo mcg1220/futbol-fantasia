@@ -3141,11 +3141,17 @@ def check_position_counts(conn, manager_id, gw):
 
 def check_ir_eligibility(conn, manager_id, gw, season=DRAFT_SEASON):
     """False if the manager's current IR occupant appeared in a raw_stats
-    row for gw-1 (i.e. was in their club's live matchday squad, including an
-    unused healthy scratch) -- meaning they weren't actually unavailable and
-    shouldn't have been parked on IR. Mirrors check_position_counts's shape.
+    row for BOTH gw-1 and gw-2 (i.e. was in their club's live matchday
+    squad two gameweeks running, including an unused healthy scratch) --
+    meaning they've been fine for two straight matches and shouldn't still
+    be on IR. Requires two consecutive appearances, not just one, because a
+    single gw-1 appearance doesn't prove they're available now -- they can
+    get hurt DURING that very match (e.g. return from injury, play gw-1,
+    and go back down in that same game), which a one-gameweek check can't
+    tell apart from someone who's actually fine. Two appearances in a row
+    is what actually rules that out. Mirrors check_position_counts's shape.
     Returns {'ok': bool, 'player_name': str|None, 'club': str|None}."""
-    if gw <= 1:
+    if gw <= 2:
         return {'ok': True, 'player_name': None, 'club': None}
     row = conn.execute("""
         SELECT r.player_name, p.club
@@ -3161,14 +3167,14 @@ def check_ir_eligibility(conn, manager_id, gw, season=DRAFT_SEASON):
     # resolve match_id through fixtures/gameweeks (season-scoped) rather
     # than matching raw_stats.gw_number directly, same fix as
     # get_roster_at_gw's identical bug earlier this season.
-    appeared = conn.execute("""
-        SELECT 1 FROM raw_stats rs
+    appeared_gws = conn.execute("""
+        SELECT DISTINCT g.gw_number FROM raw_stats rs
         JOIN fixtures f ON f.match_id = rs.match_id
         JOIN gameweeks g ON g.id = f.gw_id
-        WHERE rs.player_name=? AND g.gw_number=? AND f.season=? AND rs.external=0
-        LIMIT 1
-    """, (row['player_name'], gw - 1, season)).fetchone()
-    return {'ok': appeared is None, 'player_name': row['player_name'], 'club': row['club']}
+        WHERE rs.player_name=? AND g.gw_number IN (?, ?) AND f.season=? AND rs.external=0
+    """, (row['player_name'], gw - 1, gw - 2, season)).fetchall()
+    appeared_both = {r['gw_number'] for r in appeared_gws} == {gw - 1, gw - 2}
+    return {'ok': not appeared_both, 'player_name': row['player_name'], 'club': row['club']}
 
 
 def gw_fully_scraped(conn, season, gw_number):
