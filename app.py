@@ -3140,18 +3140,26 @@ def check_position_counts(conn, manager_id, gw):
 
 
 def check_ir_eligibility(conn, manager_id, gw, season=DRAFT_SEASON):
-    """False if the manager's current IR occupant appeared in a raw_stats
-    row for BOTH gw-1 and gw-2 (i.e. was in their club's live matchday
-    squad two gameweeks running, including an unused healthy scratch) --
-    meaning they've been fine for two straight matches and shouldn't still
-    be on IR. Requires two consecutive appearances, not just one, because a
-    single gw-1 appearance doesn't prove they're available now -- they can
-    get hurt DURING that very match (e.g. return from injury, play gw-1,
-    and go back down in that same game), which a one-gameweek check can't
-    tell apart from someone who's actually fine. Two appearances in a row
-    is what actually rules that out. Mirrors check_position_counts's shape.
+    """False if the manager's current IR occupant was ALREADY parked on IR
+    (for this same manager) during gw-1 and still appeared in a raw_stats
+    row for that gw (i.e. was in their club's live matchday squad,
+    including an unused healthy scratch) -- meaning the IR designation was
+    already false back then and still is now.
+
+    This checks something fully knowable (was a past injury claim false)
+    rather than something unknowable (is this player still hurt right
+    now). A player who gets hurt DURING gw-1's match can only be placed on
+    IR starting gw at the earliest -- you can't retroactively IR someone
+    for a week they already played -- so their gw-1 appearance necessarily
+    happens before they were ever marked injured, never while an IR slot
+    already covered that gw. A single prior-gameweek check is therefore
+    enough (no need to require multiple consecutive appearances): if the
+    player wasn't on IR yet at gw-1, their appearance there proves
+    nothing about now; if they WERE already on IR at gw-1 and still
+    appeared, that's real evidence the IR designation was never true.
+    Mirrors check_position_counts's shape.
     Returns {'ok': bool, 'player_name': str|None, 'club': str|None}."""
-    if gw <= 2:
+    if gw <= 1:
         return {'ok': True, 'player_name': None, 'club': None}
     row = conn.execute("""
         SELECT r.player_name, p.club
@@ -3162,19 +3170,29 @@ def check_ir_eligibility(conn, manager_id, gw, season=DRAFT_SEASON):
     """, (manager_id, gw, gw)).fetchone()
     if not row:
         return {'ok': True, 'player_name': None, 'club': None}
+
+    was_on_ir_last_gw = conn.execute("""
+        SELECT 1 FROM rosters
+        WHERE manager_id=? AND player_name=? AND slot_type='ir'
+          AND gw_start<=? AND (gw_end IS NULL OR gw_end>=?)
+        LIMIT 1
+    """, (manager_id, row['player_name'], gw - 1, gw - 1)).fetchone()
+    if not was_on_ir_last_gw:
+        return {'ok': True, 'player_name': row['player_name'], 'club': row['club']}
+
     # raw_stats has no season column -- gw_number alone is ambiguous between
     # seasons (e.g. both 2025-26 and 2026-27 have a GW1), so this must
     # resolve match_id through fixtures/gameweeks (season-scoped) rather
     # than matching raw_stats.gw_number directly, same fix as
     # get_roster_at_gw's identical bug earlier this season.
-    appeared_gws = conn.execute("""
-        SELECT DISTINCT g.gw_number FROM raw_stats rs
+    appeared = conn.execute("""
+        SELECT 1 FROM raw_stats rs
         JOIN fixtures f ON f.match_id = rs.match_id
         JOIN gameweeks g ON g.id = f.gw_id
-        WHERE rs.player_name=? AND g.gw_number IN (?, ?) AND f.season=? AND rs.external=0
-    """, (row['player_name'], gw - 1, gw - 2, season)).fetchall()
-    appeared_both = {r['gw_number'] for r in appeared_gws} == {gw - 1, gw - 2}
-    return {'ok': not appeared_both, 'player_name': row['player_name'], 'club': row['club']}
+        WHERE rs.player_name=? AND g.gw_number=? AND f.season=? AND rs.external=0
+        LIMIT 1
+    """, (row['player_name'], gw - 1, season)).fetchone()
+    return {'ok': appeared is None, 'player_name': row['player_name'], 'club': row['club']}
 
 
 def gw_fully_scraped(conn, season, gw_number):
@@ -3232,7 +3250,7 @@ def finalize_gw_results(conn, gw_number, season=DRAFT_SEASON):
             raw_score, _ = calc_team_score_for_gw(conn, manager_id, gw_number, season=season)
             formation_ok = check_position_counts(conn, manager_id, gw_number)['ok']
             ir_check = check_ir_eligibility(conn, manager_id, gw_number)
-            final_score = raw_score if formation_ok else 0.0
+            final_score = raw_score if (formation_ok and ir_check['ok']) else 0.0
             if not formation_ok:
                 log_audit(
                     conn, manager_id, 'scoring', 'invalid_lineup_penalty',
@@ -3241,21 +3259,13 @@ def finalize_gw_results(conn, gw_number, season=DRAFT_SEASON):
                     {"gw_number": gw_number, "season": season, "raw_score": raw_score}
                 )
             if not ir_check['ok']:
-                # Informational only, no score penalty. A player can get hurt
-                # in training or between matches with zero raw_stats signal
-                # beforehand, so no appearance-based heuristic can reliably
-                # tell "genuinely fine, shouldn't be on IR" apart from "just
-                # got hurt this week" -- rather than risk zeroing a
-                # legitimately injured manager's whole score on a guess,
-                # this is surfaced in the shared Audit History (visible to
-                # every manager, not just this one) so the league can flag
-                # it to each other instead of an automatic penalty deciding it.
                 log_audit(
-                    conn, manager_id, 'roster', 'ir_eligibility_flag',
-                    f"GW{gw_number}: {ir_check['player_name']} was in {ir_check['club']}'s matchday "
-                    f"squad for both GW{gw_number - 2} and GW{gw_number - 1} while parked on IR — "
-                    f"worth a look, no automatic penalty applied",
-                    {"gw_number": gw_number, "season": season, "player_name": ir_check['player_name'], "club": ir_check['club']}
+                    conn, manager_id, 'scoring', 'ir_violation_penalty',
+                    f"GW{gw_number}: {ir_check['player_name']} was already on IR during GW{gw_number - 1} "
+                    f"and still appeared in {ir_check['club']}'s matchday squad that week — "
+                    f"score forced to 0 (would have been {round(raw_score, 2)})",
+                    {"gw_number": gw_number, "season": season, "raw_score": raw_score,
+                     "player_name": ir_check['player_name'], "club": ir_check['club']}
                 )
             scores[manager_id] = final_score
 

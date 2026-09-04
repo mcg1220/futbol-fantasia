@@ -514,11 +514,10 @@
   <h3 class="section-title">🏥 Injury Reserve</h3>
   {% if not ir_check.ok %}
   <div class="lineup-warning">
-    ⚠️ {{ ir_check.player_name }} was in {{ ir_check.club }}'s matchday squad for both GW{{ current_gw - 2 }}
-    and GW{{ current_gw - 1 }} (including as an unused sub) — worth double-checking they're actually still
-    unavailable. Once this gameweek closes, that gets logged in <a href="/audit-history">Audit History</a>
-    for every manager to see — but there's no automatic penalty; a real injury can happen with no warning,
-    so nothing here forces a change.
+    ⚠️ {{ ir_check.player_name }} was already on IR during GW{{ current_gw - 1 }} and still appeared in
+    {{ ir_check.club }}'s matchday squad that week (including as an unused sub) — they weren't actually
+    unavailable. If they're not removed from IR before this gameweek locks, your <strong>entire team</strong>
+    will score 0 points for GW{{ current_gw }}.
   </div>
   {% endif %}
   {{ roster_table(ir, False, 'ir', 'table-ir') }}
