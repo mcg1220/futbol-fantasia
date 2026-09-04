@@ -3231,8 +3231,8 @@ def finalize_gw_results(conn, gw_number, season=DRAFT_SEASON):
         for manager_id in (mu['team_a_id'], mu['team_b_id']):
             raw_score, _ = calc_team_score_for_gw(conn, manager_id, gw_number, season=season)
             formation_ok = check_position_counts(conn, manager_id, gw_number)['ok']
-            ir_ok = check_ir_eligibility(conn, manager_id, gw_number)['ok']
-            final_score = raw_score if (formation_ok and ir_ok) else 0.0
+            ir_check = check_ir_eligibility(conn, manager_id, gw_number)
+            final_score = raw_score if formation_ok else 0.0
             if not formation_ok:
                 log_audit(
                     conn, manager_id, 'scoring', 'invalid_lineup_penalty',
@@ -3240,12 +3240,22 @@ def finalize_gw_results(conn, gw_number, season=DRAFT_SEASON):
                     f"score forced to 0 (would have been {round(raw_score, 2)})",
                     {"gw_number": gw_number, "season": season, "raw_score": raw_score}
                 )
-            if not ir_ok:
+            if not ir_check['ok']:
+                # Informational only, no score penalty. A player can get hurt
+                # in training or between matches with zero raw_stats signal
+                # beforehand, so no appearance-based heuristic can reliably
+                # tell "genuinely fine, shouldn't be on IR" apart from "just
+                # got hurt this week" -- rather than risk zeroing a
+                # legitimately injured manager's whole score on a guess,
+                # this is surfaced in the shared Audit History (visible to
+                # every manager, not just this one) so the league can flag
+                # it to each other instead of an automatic penalty deciding it.
                 log_audit(
-                    conn, manager_id, 'scoring', 'ir_violation_penalty',
-                    f"GW{gw_number}: IR occupant was in their club's squad the prior gameweek — "
-                    f"score forced to 0 (would have been {round(raw_score, 2)})",
-                    {"gw_number": gw_number, "season": season, "raw_score": raw_score}
+                    conn, manager_id, 'roster', 'ir_eligibility_flag',
+                    f"GW{gw_number}: {ir_check['player_name']} was in {ir_check['club']}'s matchday "
+                    f"squad for both GW{gw_number - 2} and GW{gw_number - 1} while parked on IR — "
+                    f"worth a look, no automatic penalty applied",
+                    {"gw_number": gw_number, "season": season, "player_name": ir_check['player_name'], "club": ir_check['club']}
                 )
             scores[manager_id] = final_score
 
