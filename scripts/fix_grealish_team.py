@@ -1,8 +1,8 @@
 """
-One-off: Ezri Konsa transferred from Aston Villa to Arsenal.
+One-off: Jack Grealish transfered from Manchester City to Everton.
 
-    python3 fix_konsa_club.py            # dry run
-    python3 fix_konsa_club.py --apply
+    python3 fix_grealish_club.py            # dry run
+    python3 fix_grealish_club.py --apply
 """
 import argparse
 import sqlite3
