@@ -28,11 +28,21 @@ Usage:
 --match_id accepts a comma-separated list to do several matches in one
 run (one login, one at a time). You'll be prompted for your PIN (not
 passed on the command line, so it doesn't end up in shell history).
+
+Pauses 10-20s between matches in a multi-match run -- hitting WhoScored
+back-to-back with no delay looks bot-like and is the leading suspect for
+a run that dies partway through with no Python error at all (a silent
+kill, rather than a caught timeout). If a run still dies silently after
+this change, that points back to something OS-level instead -- e.g. a
+macOS Gatekeeper "Malicious Script Blocked" dialog killing the process,
+fixed by running `xattr -cr ~/Library/Caches/ms-playwright && playwright
+install --force` and re-running.
 """
 import argparse
 import getpass
 import http.cookiejar
 import json
+import random
 import re
 import sys
 import time
@@ -43,6 +53,13 @@ import scraper
 from playwright.sync_api import sync_playwright
 
 DEFAULT_SITE = "https://futbol-fantasia.onrender.com"
+
+# Pause between consecutive matches in a multi-match run -- hitting
+# WhoScored back-to-back with zero delay looks more bot-like than a person
+# actually reading each match's page, and is the leading suspect for scrapes
+# that die partway through a long --match_id list with no Python error at
+# all (a silent kill, rather than a caught timeout/exception).
+DELAY_BETWEEN_MATCHES_SECONDS = (10, 20)
 
 
 def scrape_match_plain_playwright(match_id):
@@ -199,6 +216,11 @@ def main():
         except Exception as e:
             print(f"  Error on match {match_id}: {e}")
             failed.append(match_id)
+
+        if i < len(match_ids):
+            pause = random.uniform(*DELAY_BETWEEN_MATCHES_SECONDS)
+            print(f"  Pausing {pause:.0f}s before the next match...")
+            time.sleep(pause)
 
     print(f"\n{len(succeeded)}/{len(match_ids)} match(es) uploaded successfully.")
     if failed:
