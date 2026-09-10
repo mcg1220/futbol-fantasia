@@ -114,7 +114,7 @@ def get_db():
 # session['manager_id'] gets set.
 
 LOGIN_EXEMPT_PATHS_EXACT = {
-    '/login', '/internal/auto-scrape-trigger',
+    '/login', '/internal/auto-scrape-trigger', '/internal/sync-fixture-schedule',
     # World Cup draft-randomizer generator — pure RNG, no DB writes, no
     # manager identity needed to watch it run (see /draft-randomizer-poc
     # and the real /draft page). The endpoint that actually persists a
@@ -5530,6 +5530,161 @@ def auto_scrape_trigger():
         return jsonify({"status": "checked"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ── Fixture schedule sync (FotMob) ───────────────────────────────────────────
+# Replaces the manual "export from Fantrax, hand-parse, one-off script" flow
+# used through GW9 -- one request to FotMob's own (unofficial, undocumented)
+# site API returns the whole season's schedule at once, keyed by round
+# number, so this can both backfill gameweeks that have no schedule yet and
+# pick up rearranged kickoffs (TV moves, postponements) for ones that do.
+#
+# Same category of risk as WhoScored: an unofficial API can change shape or
+# start blocking a host's IP with no warning. This is a much smaller
+# footprint than the live-stats scraper that got Render's IP blocked there
+# (one small GET for schedule metadata, not per-match scraping), so it's
+# worth trying server-side first -- if FotMob ever blocks Render, the
+# fallback is the same shape as scrape_and_upload.py: run it locally instead.
+
+FOTMOB_LEAGUE_ID = 47  # Premier League
+
+# FotMob's own club names for the 2026-27 season -> this app's canonical
+# club names (see `players.club` / RELEGATED_CLUBS). Confirmed against a
+# live pull covering the full 380-match season -- exactly this app's 20
+# current top-flight clubs, no more, no less.
+FOTMOB_TEAM_NAME_MAP = {
+    'AFC Bournemouth': 'Bournemouth',
+    'Arsenal': 'Arsenal',
+    'Aston Villa': 'Aston Villa',
+    'Brentford': 'Brentford',
+    'Brighton & Hove Albion': 'Brighton',
+    'Chelsea': 'Chelsea',
+    'Coventry City': 'Coventry',
+    'Crystal Palace': 'Crystal Palace',
+    'Everton': 'Everton',
+    'Fulham': 'Fulham',
+    'Hull City': 'Hull',
+    'Ipswich Town': 'Ipswich',
+    'Leeds United': 'Leeds',
+    'Liverpool': 'Liverpool',
+    'Manchester City': 'Manchester City',
+    'Manchester United': 'Manchester United',
+    'Newcastle United': 'Newcastle',
+    'Nottingham Forest': 'Nottingham Forest',
+    'Sunderland': 'Sunderland',
+    'Tottenham Hotspur': 'Tottenham',
+}
+
+
+def fetch_fotmob_fixture_schedule():
+    """One request, the whole season: FotMob's league endpoint returns every
+    match's round (-> our gw_number), home/away clubs, and kickoff time in
+    UTC. Raises on any failure (network, unexpected shape) rather than
+    silently returning a partial list -- the caller should skip this sync
+    pass entirely rather than apply a broken/partial fetch.
+
+    Unrecognized club names (FotMob renamed a club, or a name outside
+    FOTMOB_TEAM_NAME_MAP) are skipped per-match rather than guessed at --
+    reported back to the caller so a real rename can be added deliberately."""
+    req = urllib.request.Request(
+        f"https://www.fotmob.com/api/data/leagues?id={FOTMOB_LEAGUE_ID}",
+        headers={'User-Agent': 'Mozilla/5.0'}
+    )
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        data = json.loads(resp.read())
+
+    matches, unrecognized_clubs = [], set()
+    for m in data['fixtures']['allMatches']:
+        home = FOTMOB_TEAM_NAME_MAP.get(m['home']['name'])
+        away = FOTMOB_TEAM_NAME_MAP.get(m['away']['name'])
+        if not home:
+            unrecognized_clubs.add(m['home']['name'])
+        if not away:
+            unrecognized_clubs.add(m['away']['name'])
+        if not home or not away:
+            continue
+        utc_dt = datetime.fromisoformat(m['status']['utcTime'].replace('Z', '+00:00'))
+        eastern_dt = utc_dt.astimezone(ZoneInfo('America/New_York'))
+        matches.append({
+            'gw_number': int(m['round']),
+            'home_club': home,
+            'away_club': away,
+            'match_date': eastern_dt.strftime('%Y-%m-%d'),
+            'kickoff_time': eastern_dt.strftime('%H:%M'),
+        })
+    return matches, sorted(unrecognized_clubs)
+
+
+def sync_fixture_schedule(conn, season=DRAFT_SEASON):
+    """Fills in/updates match_date + kickoff_time for every fixture row that's
+    missing it or has drifted from FotMob's current schedule (e.g. a TV-
+    rearranged kickoff). Matches by (season, gw_number, home_club,
+    away_club) -- never touches which clubs are paired against each other,
+    only when they kick off. Does not commit -- caller commits. Returns a
+    summary dict."""
+    fotmob_fixtures, unrecognized_clubs = fetch_fotmob_fixture_schedule()
+
+    updated, unmatched = 0, []
+    for fx in fotmob_fixtures:
+        row = conn.execute("""
+            SELECT f.id, f.match_date, f.kickoff_time
+            FROM fixtures f JOIN gameweeks g ON g.id = f.gw_id
+            WHERE g.season=? AND g.gw_number=? AND f.home_club=? AND f.away_club=?
+        """, (season, fx['gw_number'], fx['home_club'], fx['away_club'])).fetchone()
+        if not row:
+            unmatched.append(fx)
+            continue
+        if row['match_date'] == fx['match_date'] and row['kickoff_time'] == fx['kickoff_time']:
+            continue
+        conn.execute(
+            "UPDATE fixtures SET match_date=?, kickoff_time=? WHERE id=?",
+            (fx['match_date'], fx['kickoff_time'], row['id'])
+        )
+        updated += 1
+
+    return {
+        "total_fotmob_fixtures": len(fotmob_fixtures),
+        "updated": updated,
+        "unmatched": unmatched,
+        "unrecognized_clubs": unrecognized_clubs,
+    }
+
+
+@app.route('/internal/sync-fixture-schedule', methods=['POST'])
+def sync_fixture_schedule_trigger():
+    """
+    Host-level scheduled job endpoint (e.g. a Render Cron Job) that keeps
+    every gameweek's kickoff dates/times current from FotMob, so this never
+    has to go back to a manual Fantrax-export-and-parse pass. Guarded by
+    the same shared-secret pattern as /internal/auto-scrape-trigger.
+    """
+    secret = os.environ.get('INTERNAL_TRIGGER_SECRET')
+    if not secret or request.headers.get('X-Trigger-Secret') != secret:
+        return jsonify({"error": "unauthorized"}), 403
+    conn = get_db()
+    try:
+        result = sync_fixture_schedule(conn)
+        log_audit(conn, None, 'fixtures', 'schedule_sync',
+                  f"Synced fixture schedule from FotMob: {result['updated']} updated, "
+                  f"{len(result['unmatched'])} unmatched, "
+                  f"{len(result['unrecognized_clubs'])} unrecognized club name(s)",
+                  {"updated": result['updated'],
+                   "unmatched": [f"GW{u['gw_number']}: {u['home_club']} vs {u['away_club']}" for u in result['unmatched']],
+                   "unrecognized_clubs": result['unrecognized_clubs']})
+        conn.commit()
+        return jsonify({
+            "status": "ok",
+            "total_fotmob_fixtures": result['total_fotmob_fixtures'],
+            "updated": result['updated'],
+            "unmatched": result['unmatched'],
+            "unrecognized_clubs": result['unrecognized_clubs'],
+        })
+    except Exception as e:
+        conn.rollback()
+        print(f"sync_fixture_schedule error: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
 
 
 # ── World Cup draft-randomizer ──────────────────────────────────────────────
