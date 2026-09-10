@@ -431,13 +431,18 @@ def build_fixture_day_groups(fixture_rows):
             date_obj = datetime.strptime(current_date, '%Y-%m-%d')
             groups.append({'label': date_obj.strftime('%A, %B %-d'), 'matches': []})
         _, time_label = format_kickoff(r['match_date'], r['kickoff_time'])
+        played = r['goals_home'] is not None and r['goals_away'] is not None
         groups[-1]['matches'].append({
-            'match_id': r['match_id'], 'home_club': r['home_club'], 'away_club': r['away_club'], 'time': time_label
+            'match_id': r['match_id'], 'home_club': r['home_club'], 'away_club': r['away_club'], 'time': time_label,
+            'score': f"{r['goals_home']}-{r['goals_away']}" if played else None,
         })
 
     if unscheduled:
         groups.append({'label': None, 'matches': [
-            {'match_id': r['match_id'], 'home_club': r['home_club'], 'away_club': r['away_club'], 'time': None}
+            {
+                'match_id': r['match_id'], 'home_club': r['home_club'], 'away_club': r['away_club'], 'time': None,
+                'score': f"{r['goals_home']}-{r['goals_away']}" if (r['goals_home'] is not None and r['goals_away'] is not None) else None,
+            }
             for r in unscheduled
         ]})
 
@@ -1357,7 +1362,7 @@ def gameweek(gw=None):
                 m['live_score_b'], _ = calc_team_score_for_gw(conn, m['team_b_id'], gw, season=season)
 
     fixture_rows = c.execute("""
-        SELECT f.match_id, f.home_club, f.away_club, f.match_date, f.kickoff_time
+        SELECT f.match_id, f.home_club, f.away_club, f.match_date, f.kickoff_time, f.goals_home, f.goals_away
         FROM fixtures f
         JOIN gameweeks g ON g.id = f.gw_id
         WHERE g.gw_number = ? AND f.season = ?
@@ -5605,12 +5610,25 @@ def fetch_fotmob_fixture_schedule():
             continue
         utc_dt = datetime.fromisoformat(m['status']['utcTime'].replace('Z', '+00:00'))
         eastern_dt = utc_dt.astimezone(ZoneInfo('America/New_York'))
+
+        # Display-only final score -- distinct from raw_stats/calc_player_score,
+        # which is the only thing actual fantasy scoring ever reads. FotMob's
+        # scoreStr ("3 - 0") is only present once a match has finished.
+        goals_home = goals_away = None
+        if m['status'].get('finished') and m['status'].get('scoreStr'):
+            parts = m['status']['scoreStr'].split(' - ')
+            if len(parts) == 2 and all(p.strip().isdigit() for p in parts):
+                goals_home, goals_away = int(parts[0].strip()), int(parts[1].strip())
+
         matches.append({
             'gw_number': int(m['round']),
             'home_club': home,
             'away_club': away,
             'match_date': eastern_dt.strftime('%Y-%m-%d'),
             'kickoff_time': eastern_dt.strftime('%H:%M'),
+            'finished': bool(m['status'].get('finished')),
+            'goals_home': goals_home,
+            'goals_away': goals_away,
         })
     return matches, sorted(unrecognized_clubs)
 
@@ -5618,27 +5636,36 @@ def fetch_fotmob_fixture_schedule():
 def sync_fixture_schedule(conn, season=DRAFT_SEASON):
     """Fills in/updates match_date + kickoff_time for every fixture row that's
     missing it or has drifted from FotMob's current schedule (e.g. a TV-
-    rearranged kickoff). Matches by (season, gw_number, home_club,
-    away_club) -- never touches which clubs are paired against each other,
-    only when they kick off. Does not commit -- caller commits. Returns a
-    summary dict."""
+    rearranged kickoff), and -- separately -- the display-only final score
+    once FotMob shows a match as finished. Matches by (season, gw_number,
+    home_club, away_club) -- never touches which clubs are paired against
+    each other, only when they kick off and (once played) what the result
+    was. The score is purely informational: real fantasy scoring is computed
+    entirely from raw_stats via calc_player_score, never from
+    fixtures.goals_home/goals_away, so this can't affect anyone's points --
+    it just lets a final score show up here well before the WhoScored
+    scrape-and-upload workflow gets around to that gameweek. Does not
+    commit -- caller commits. Returns a summary dict."""
     fotmob_fixtures, unrecognized_clubs = fetch_fotmob_fixture_schedule()
 
     updated, unmatched = 0, []
     for fx in fotmob_fixtures:
         row = conn.execute("""
-            SELECT f.id, f.match_date, f.kickoff_time
+            SELECT f.id, f.match_date, f.kickoff_time, f.goals_home, f.goals_away
             FROM fixtures f JOIN gameweeks g ON g.id = f.gw_id
             WHERE g.season=? AND g.gw_number=? AND f.home_club=? AND f.away_club=?
         """, (season, fx['gw_number'], fx['home_club'], fx['away_club'])).fetchone()
         if not row:
             unmatched.append(fx)
             continue
-        if row['match_date'] == fx['match_date'] and row['kickoff_time'] == fx['kickoff_time']:
+        new_goals_home = fx['goals_home'] if fx['finished'] else row['goals_home']
+        new_goals_away = fx['goals_away'] if fx['finished'] else row['goals_away']
+        if (row['match_date'] == fx['match_date'] and row['kickoff_time'] == fx['kickoff_time']
+                and row['goals_home'] == new_goals_home and row['goals_away'] == new_goals_away):
             continue
         conn.execute(
-            "UPDATE fixtures SET match_date=?, kickoff_time=? WHERE id=?",
-            (fx['match_date'], fx['kickoff_time'], row['id'])
+            "UPDATE fixtures SET match_date=?, kickoff_time=?, goals_home=?, goals_away=? WHERE id=?",
+            (fx['match_date'], fx['kickoff_time'], new_goals_home, new_goals_away, row['id'])
         )
         updated += 1
 

@@ -220,13 +220,14 @@ cd scripts</pre>
           <th style="text-align:left">Home</th>
           <th></th>
           <th style="text-align:right">Away</th>
+          <th style="text-align:center">Score</th>
           <th style="text-align:right">Kickoff</th>
         </tr>
       </thead>
       <tbody>
         {% for group in day_groups %}
           {% if group.label %}
-          <tr class="fixture-day-row"><td colspan="4" class="fixture-day-label">{{ group.label }}</td></tr>
+          <tr class="fixture-day-row"><td colspan="5" class="fixture-day-label">{{ group.label }}</td></tr>
           {% endif %}
           {% for f in group.matches %}
           <tr>
@@ -246,6 +247,13 @@ cd scripts</pre>
                   <img src="{{ badges[f.away_club] }}" alt="{{ f.away_club }}" class="club-badge" />
                 {% endif %}
               </span>
+            </td>
+            <td class="fixture-score" style="text-align:center">
+              {% if f.score %}
+                <strong>{{ f.score }}</strong>
+              {% else %}
+                <span class="text-muted-cell">Not played yet</span>
+              {% endif %}
             </td>
             <td class="fixture-kickoff" style="text-align:right">{{ f.time or '—' }}</td>
           </tr>
