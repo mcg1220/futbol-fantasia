@@ -13,6 +13,7 @@ import traceback
 import urllib.request
 import urllib.parse
 import urllib.error
+import unicodedata
 from html.parser import HTMLParser
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -114,7 +115,7 @@ def get_db():
 # session['manager_id'] gets set.
 
 LOGIN_EXEMPT_PATHS_EXACT = {
-    '/login', '/internal/auto-scrape-trigger', '/internal/sync-fixture-schedule',
+    '/login', '/internal/auto-scrape-trigger', '/internal/sync-fixture-schedule', '/internal/sync-lineups',
     # World Cup draft-randomizer generator — pure RNG, no DB writes, no
     # manager identity needed to watch it run (see /draft-randomizer-poc
     # and the real /draft page). The endpoint that actually persists a
@@ -5621,6 +5622,7 @@ def fetch_fotmob_fixture_schedule():
                 goals_home, goals_away = int(parts[0].strip()), int(parts[1].strip())
 
         matches.append({
+            'fotmob_id': int(m['id']),
             'gw_number': int(m['round']),
             'home_club': home,
             'away_club': away,
@@ -5651,7 +5653,7 @@ def sync_fixture_schedule(conn, season=DRAFT_SEASON):
     updated, unmatched = 0, []
     for fx in fotmob_fixtures:
         row = conn.execute("""
-            SELECT f.id, f.match_date, f.kickoff_time, f.goals_home, f.goals_away
+            SELECT f.id, f.match_date, f.kickoff_time, f.goals_home, f.goals_away, f.fotmob_id
             FROM fixtures f JOIN gameweeks g ON g.id = f.gw_id
             WHERE g.season=? AND g.gw_number=? AND f.home_club=? AND f.away_club=?
         """, (season, fx['gw_number'], fx['home_club'], fx['away_club'])).fetchone()
@@ -5661,11 +5663,12 @@ def sync_fixture_schedule(conn, season=DRAFT_SEASON):
         new_goals_home = fx['goals_home'] if fx['finished'] else row['goals_home']
         new_goals_away = fx['goals_away'] if fx['finished'] else row['goals_away']
         if (row['match_date'] == fx['match_date'] and row['kickoff_time'] == fx['kickoff_time']
-                and row['goals_home'] == new_goals_home and row['goals_away'] == new_goals_away):
+                and row['goals_home'] == new_goals_home and row['goals_away'] == new_goals_away
+                and row['fotmob_id'] == fx['fotmob_id']):
             continue
         conn.execute(
-            "UPDATE fixtures SET match_date=?, kickoff_time=?, goals_home=?, goals_away=? WHERE id=?",
-            (fx['match_date'], fx['kickoff_time'], new_goals_home, new_goals_away, row['id'])
+            "UPDATE fixtures SET match_date=?, kickoff_time=?, goals_home=?, goals_away=?, fotmob_id=? WHERE id=?",
+            (fx['match_date'], fx['kickoff_time'], new_goals_home, new_goals_away, fx['fotmob_id'], row['id'])
         )
         updated += 1
 
@@ -5709,6 +5712,146 @@ def sync_fixture_schedule_trigger():
     except Exception as e:
         conn.rollback()
         print(f"sync_fixture_schedule error: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
+
+# ── Confirmed-lineup sync (FotMob) ───────────────────────────────────────────
+# Auto-marks a rostered player 'starting' in player_start_status once their
+# real club's lineup is officially confirmed -- never earlier. FotMob shows a
+# lineup well before that (lineupType: "predicted", its own algorithmic
+# guess), which is NOT the real team news and must never be treated as one --
+# verified live against a real match 40 minutes from kickoff, where the type
+# had already flipped from "predicted" to "standard" (the same value seen on
+# an already-finished match, i.e. the real XI that actually played).
+#
+# Deliberately one-directional: only ever sets 'starting', never
+# 'not_starting'. A player_start_status of 'not_starting' can talk a manager
+# out of starting someone who actually is -- if this feature's name-matching
+# ever misses a real starter (an accent/spelling gap), the failure mode
+# must be "left blank, exactly like today" (safe), never "wrongly marked
+# benched" (costs someone real fantasy points, exactly the risk this whole
+# feature exists to reduce, not add to).
+
+LINEUP_CHECK_WINDOW = timedelta(minutes=75)  # start looking for a confirmed lineup at most this long before kickoff
+
+
+def fetch_fotmob_match_lineup(fotmob_id):
+    """One match's lineup from FotMob. Returns (is_confirmed, home_starters,
+    away_starters) -- starters are the raw player-name strings FotMob uses,
+    unmatched against our own roster here (that's the caller's job).
+    is_confirmed is False for a "predicted" lineup (or if the section is
+    simply missing/errors) -- callers must never act on an unconfirmed one.
+    """
+    req = urllib.request.Request(
+        f"https://www.fotmob.com/api/data/matchDetails?matchId={fotmob_id}",
+        headers={'User-Agent': 'Mozilla/5.0'}
+    )
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        data = json.loads(resp.read())
+
+    lineup = data.get('content', {}).get('lineup') or {}
+    if not lineup or lineup.get('lineupType') == 'predicted':
+        return False, [], []
+
+    home_starters = [p['name'] for p in lineup.get('homeTeam', {}).get('starters', [])]
+    away_starters = [p['name'] for p in lineup.get('awayTeam', {}).get('starters', [])]
+    return True, home_starters, away_starters
+
+
+def _normalize_name(name):
+    decomposed = unicodedata.normalize('NFKD', name)
+    return ''.join(c for c in decomposed if not unicodedata.combining(c)).lower().strip()
+
+
+def sync_confirmed_lineups(conn, season=DRAFT_SEASON):
+    """For every fixture kicking off soon (within LINEUP_CHECK_WINDOW) whose
+    result isn't in yet, checks FotMob for a confirmed lineup and marks any
+    rostered player found in it as 'starting' for that gw -- see the section
+    docstring above for why this never sets 'not_starting'. Matches by exact
+    accent-insensitive name only, no fuzzy matching (a miss here just leaves
+    a player unmarked; a wrong fuzzy match could mislabel a real starter).
+    Does not commit -- caller commits. Returns a summary dict."""
+    now = now_eastern_naive()
+    candidates = conn.execute("""
+        SELECT f.id, f.fotmob_id, f.match_date, f.kickoff_time, g.gw_number
+        FROM fixtures f JOIN gameweeks g ON g.id = f.gw_id
+        WHERE f.season=? AND f.fotmob_id IS NOT NULL AND f.goals_home IS NULL
+          AND f.match_date IS NOT NULL AND f.kickoff_time IS NOT NULL
+    """, (season,)).fetchall()
+
+    checked, confirmed, marked_starting, errors = 0, 0, [], []
+    for row in candidates:
+        kickoff = datetime.strptime(f"{row['match_date']} {row['kickoff_time']}", '%Y-%m-%d %H:%M')
+        if not (now <= kickoff <= now + LINEUP_CHECK_WINDOW):
+            continue
+        checked += 1
+        try:
+            is_confirmed, home_starters, away_starters = fetch_fotmob_match_lineup(row['fotmob_id'])
+        except Exception as e:
+            errors.append(f"gw_number={row['gw_number']} fotmob_id={row['fotmob_id']}: {e}")
+            continue
+        if not is_confirmed:
+            continue
+        confirmed += 1
+
+        starter_norms = {_normalize_name(n) for n in home_starters + away_starters}
+        rostered = conn.execute("""
+            SELECT DISTINCT player_name FROM rosters
+            WHERE gw_start<=? AND (gw_end IS NULL OR gw_end>=?)
+        """, (row['gw_number'], row['gw_number'])).fetchall()
+
+        for r in rostered:
+            if _normalize_name(r['player_name']) not in starter_norms:
+                continue
+            existing = conn.execute("""
+                SELECT status FROM player_start_status WHERE player_name=? AND gw=? AND season=?
+            """, (r['player_name'], row['gw_number'], season)).fetchone()
+            if existing and existing['status'] == 'starting':
+                continue  # already recorded (by a manager or an earlier pass) -- no-op
+            conn.execute("""
+                INSERT INTO player_start_status (player_name, gw, season, status, updated_by, updated_at)
+                VALUES (?, ?, ?, 'starting', NULL, ?)
+                ON CONFLICT(player_name, gw, season) DO UPDATE SET
+                    status='starting', updated_by=NULL, updated_at=excluded.updated_at
+            """, (r['player_name'], row['gw_number'], season, now.isoformat()))
+            marked_starting.append(f"GW{row['gw_number']}: {r['player_name']}")
+
+    return {
+        "checked": checked,
+        "confirmed": confirmed,
+        "marked_starting": marked_starting,
+        "errors": errors,
+    }
+
+
+@app.route('/internal/sync-lineups', methods=['POST'])
+def sync_lineups_trigger():
+    """
+    Host-level scheduled job endpoint (e.g. a Render Cron Job, running every
+    10-15 minutes) that checks for newly-confirmed lineups and auto-marks
+    'starting' for any rostered player found in one. Guarded by the same
+    shared-secret pattern as /internal/auto-scrape-trigger.
+    """
+    secret = os.environ.get('INTERNAL_TRIGGER_SECRET')
+    if not secret or request.headers.get('X-Trigger-Secret') != secret:
+        return jsonify({"error": "unauthorized"}), 403
+    conn = get_db()
+    try:
+        result = sync_confirmed_lineups(conn)
+        if result['marked_starting'] or result['errors']:
+            log_audit(conn, None, 'roster', 'lineup_sync',
+                      f"Confirmed-lineup sync: checked {result['checked']}, "
+                      f"{result['confirmed']} confirmed, "
+                      f"{len(result['marked_starting'])} player(s) marked starting, "
+                      f"{len(result['errors'])} error(s)",
+                      result)
+        conn.commit()
+        return jsonify({"status": "ok", **result})
+    except Exception as e:
+        conn.rollback()
+        print(f"sync_confirmed_lineups error: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
