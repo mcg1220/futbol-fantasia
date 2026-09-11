@@ -116,6 +116,7 @@ def get_db():
 
 LOGIN_EXEMPT_PATHS_EXACT = {
     '/login', '/internal/auto-scrape-trigger', '/internal/sync-fixture-schedule', '/internal/sync-lineups',
+    '/internal/waiver-window-sync',
     # World Cup draft-randomizer generator — pure RNG, no DB writes, no
     # manager identity needed to watch it run (see /draft-randomizer-poc
     # and the real /draft page). The endpoint that actually persists a
@@ -3510,70 +3511,86 @@ def seed_waiver_order_if_needed(conn, season):
         )
 
 
+def _do_open_waiver_window(conn, season, gw, actor_manager_id=None):
+    """Core open logic, shared by the manual /api/waiver/open route and the
+    automated waiver poller (see maybe_auto_transition_waiver_window). `gw`
+    = "this window follows GW{gw}" -- the caller decides how to compute it
+    (the manual route uses a simple sequential MAX(gw)+1 counter; the
+    automated path derives it from real kickoff times). Raises ValueError
+    if a window is already open. Does not commit -- caller's job."""
+    if get_open_waiver_window(conn, season):
+        raise ValueError("A waiver window is already open.")
+
+    seed_waiver_order_if_needed(conn, season)
+
+    next_num = conn.execute(
+        "SELECT COALESCE(MAX(window_number), 0) + 1 FROM waiver_windows WHERE season=?", (season,)
+    ).fetchone()[0]
+
+    conn.execute(
+        "INSERT INTO waiver_windows (season, window_number, gw, status, opened_at) VALUES (?, ?, ?, 'open', ?)",
+        (season, next_num, gw, now_eastern_naive().isoformat())
+    )
+    window_id = conn.execute(
+        "SELECT id FROM waiver_windows WHERE season=? AND window_number=?", (season, next_num)
+    ).fetchone()['id']
+    log_audit(conn, actor_manager_id, 'waiver', 'open_window', f"Opened waiver window #{next_num} (GW{gw})")
+
+    # Fold in any locked-add pickups that were queued while no window
+    # existed (see submit_or_queue_claim) -- re-validate each against
+    # current roster state, since it may have drifted since it was
+    # queued, rather than trusting the queued row blindly.
+    pending_rows = conn.execute(
+        "SELECT * FROM pending_waiver_claims WHERE season=? ORDER BY manager_id, id", (season,)
+    ).fetchall()
+    priority_by_manager = {}
+    promoted = 0
+    for row in pending_rows:
+        ok, err = validate_claim_target(conn, row['manager_id'], row['add_player'], row['drop_player'], gw, bool(row['to_ir']))
+        if not ok:
+            log_audit(conn, row['manager_id'], 'waiver', 'pending_claim_dropped',
+                      f"Could not promote queued claim for {row['add_player']}: {err}")
+            continue
+        next_priority = priority_by_manager.get(row['manager_id'])
+        if next_priority is None:
+            next_priority = conn.execute("""
+                SELECT COALESCE(MAX(priority), 0) + 1 FROM waiver_claims
+                WHERE window_id=? AND manager_id=? AND status='pending'
+            """, (window_id, row['manager_id'])).fetchone()[0]
+        conn.execute("""
+            INSERT INTO waiver_claims (window_id, manager_id, add_player, drop_player, to_ir, priority, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+        """, (window_id, row['manager_id'], row['add_player'], row['drop_player'],
+              row['to_ir'], next_priority, now_eastern_naive().isoformat()))
+        priority_by_manager[row['manager_id']] = next_priority + 1
+        promoted += 1
+        log_audit(conn, row['manager_id'], 'waiver', 'claim_promoted',
+                  f"Queued claim for {row['add_player']} promoted into waiver window #{next_num}",
+                  {"add_player": row['add_player'], "drop_player": row['drop_player'], "to_ir": bool(row['to_ir'])})
+    conn.execute("DELETE FROM pending_waiver_claims WHERE season=?", (season,))
+
+    return {"status": "ok", "window_number": next_num, "gw": gw, "promoted_pending_claims": promoted}
+
+
 @app.route('/api/waiver/open', methods=['POST'])
 def waiver_open():
     conn = get_db()
     try:
         season = DRAFT_SEASON
-        if get_open_waiver_window(conn, season):
-            return jsonify({"error": "A waiver window is already open."}), 409
-
-        seed_waiver_order_if_needed(conn, season)
-
-        next_num = conn.execute(
-            "SELECT COALESCE(MAX(window_number), 0) + 1 FROM waiver_windows WHERE season=?", (season,)
-        ).fetchone()[0]
-        # Purely sequential — each window is "following" the next GW after
-        # the last one opened, independent of scraper/scoring timing (no
-        # real kickoff-time data exists to derive this automatically).
+        # Purely sequential — each manually-opened window "follows" the next
+        # GW after the last one opened. This is a deliberately dumb ad hoc
+        # counter for the manual override button, independent of kickoff
+        # timing (see maybe_auto_transition_waiver_window for the
+        # kickoff-aware automated path).
         gw = conn.execute(
             "SELECT COALESCE(MAX(gw), 0) + 1 FROM waiver_windows WHERE season=?", (season,)
         ).fetchone()[0]
-
-        conn.execute(
-            "INSERT INTO waiver_windows (season, window_number, gw, status, opened_at) VALUES (?, ?, ?, 'open', ?)",
-            (season, next_num, gw, now_eastern_naive().isoformat())
-        )
-        window_id = conn.execute(
-            "SELECT id FROM waiver_windows WHERE season=? AND window_number=?", (season, next_num)
-        ).fetchone()['id']
-        log_audit(conn, None, 'waiver', 'open_window', f"Opened waiver window #{next_num} (GW{gw})")
-
-        # Fold in any locked-add pickups that were queued while no window
-        # existed (see submit_or_queue_claim) -- re-validate each against
-        # current roster state, since it may have drifted since it was
-        # queued, rather than trusting the queued row blindly.
-        pending_rows = conn.execute(
-            "SELECT * FROM pending_waiver_claims WHERE season=? ORDER BY manager_id, id", (season,)
-        ).fetchall()
-        priority_by_manager = {}
-        promoted = 0
-        for row in pending_rows:
-            ok, err = validate_claim_target(conn, row['manager_id'], row['add_player'], row['drop_player'], gw, bool(row['to_ir']))
-            if not ok:
-                log_audit(conn, row['manager_id'], 'waiver', 'pending_claim_dropped',
-                          f"Could not promote queued claim for {row['add_player']}: {err}")
-                continue
-            next_priority = priority_by_manager.get(row['manager_id'])
-            if next_priority is None:
-                next_priority = conn.execute("""
-                    SELECT COALESCE(MAX(priority), 0) + 1 FROM waiver_claims
-                    WHERE window_id=? AND manager_id=? AND status='pending'
-                """, (window_id, row['manager_id'])).fetchone()[0]
-            conn.execute("""
-                INSERT INTO waiver_claims (window_id, manager_id, add_player, drop_player, to_ir, priority, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
-            """, (window_id, row['manager_id'], row['add_player'], row['drop_player'],
-                  row['to_ir'], next_priority, now_eastern_naive().isoformat()))
-            priority_by_manager[row['manager_id']] = next_priority + 1
-            promoted += 1
-            log_audit(conn, row['manager_id'], 'waiver', 'claim_promoted',
-                      f"Queued claim for {row['add_player']} promoted into waiver window #{next_num}",
-                      {"add_player": row['add_player'], "drop_player": row['drop_player'], "to_ir": bool(row['to_ir'])})
-        conn.execute("DELETE FROM pending_waiver_claims WHERE season=?", (season,))
-
+        result = _do_open_waiver_window(conn, season, gw, actor_manager_id=current_manager_id())
         conn.commit()
-        return jsonify({"status": "ok", "window_number": next_num, "gw": gw, "promoted_pending_claims": promoted})
+        return jsonify(result)
+    except ValueError as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 409
     except Exception as e:
         conn.rollback()
         print(f"waiver_open error: {traceback.format_exc()}")
@@ -3771,15 +3788,96 @@ def waiver_claims_reorder_all():
         conn.close()
 
 
+def _do_process_waivers(conn, season, gw, actor_manager_id=None):
+    """
+    Core turn-by-turn processing logic, shared by the manual
+    /api/waiver/process route and the automated waiver poller (see
+    maybe_auto_transition_waiver_window). `gw` is the gameweek roster
+    changes take effect for (passed straight to execute_roster_swap) --
+    the manual route sources this from the client's CURRENT_GW; the
+    automated path uses window['gw'] + 1 (the upcoming gameweek), computed
+    directly rather than via get_current_gw() (which tracks "last closed
+    gw," not real kickoff timing, and is capped at 33 while this league
+    runs 38 gws).
+
+    Per spec: repeatedly re-scan the waiver order from the top for the
+    first manager with an unresolved claim, attempt their highest-priority
+    remaining claim, then repeat. Success moves that manager to the bottom
+    of the order; failure leaves their position unchanged so a follow-up
+    claim (if any) is retried on the next scan. Raises ValueError if no
+    window is open. Does not commit -- caller's job.
+    """
+    window = get_open_waiver_window(conn, season)
+    if not window:
+        raise ValueError("No waiver window is currently open.")
+
+    order = [r['manager_id'] for r in get_waiver_order(conn, season)]
+
+    pending = {}
+    claims = conn.execute("""
+        SELECT * FROM waiver_claims WHERE window_id=? AND status='pending' ORDER BY manager_id, priority
+    """, (window['id'],)).fetchall()
+    for cl in claims:
+        pending.setdefault(cl['manager_id'], []).append(dict(cl))
+
+    claimed_this_run = set()
+    sequence = 0
+
+    while True:
+        next_manager = None
+        for m in order:
+            if pending.get(m):
+                next_manager = m
+                break
+        if next_manager is None:
+            break
+
+        claim = pending[next_manager][0]
+        sequence += 1
+
+        if claim['add_player'] in claimed_this_run:
+            fail_reason = f"{claim['add_player']} was already claimed earlier this window"
+            conn.execute(
+                "UPDATE waiver_claims SET status='failed', fail_reason=?, sequence_number=? WHERE id=?",
+                (fail_reason, sequence, claim['id'])
+            )
+            pending[next_manager].pop(0)
+            continue
+
+        ok, info = execute_roster_swap(conn, next_manager, claim['add_player'], claim['drop_player'], gw,
+                                        'waiver_claim', to_ir=bool(claim.get('to_ir')))
+        if ok:
+            conn.execute(
+                "UPDATE waiver_claims SET status='success', sequence_number=? WHERE id=?",
+                (sequence, claim['id'])
+            )
+            claimed_this_run.add(claim['add_player'])
+            pending[next_manager].pop(0)
+            order.remove(next_manager)
+            order.append(next_manager)
+        else:
+            conn.execute(
+                "UPDATE waiver_claims SET status='failed', fail_reason=?, sequence_number=? WHERE id=?",
+                (info['error'], sequence, claim['id'])
+            )
+            pending[next_manager].pop(0)
+
+    conn.execute("DELETE FROM waiver_order WHERE season=?", (season,))
+    for i, manager_id in enumerate(order, start=1):
+        conn.execute(
+            "INSERT INTO waiver_order (season, manager_id, position) VALUES (?, ?, ?)",
+            (season, manager_id, i)
+        )
+
+    conn.execute(
+        "UPDATE waiver_windows SET status='complete', closed_at=? WHERE id=?",
+        (now_eastern_naive().isoformat(), window['id'])
+    )
+    return {"status": "ok", "processed": sequence}
+
+
 @app.route('/api/waiver/process', methods=['POST'])
 def waiver_process():
-    """
-    Turn-by-turn processing per spec: repeatedly re-scan the waiver order
-    from the top for the first manager with an unresolved claim, attempt
-    their highest-priority remaining claim, then repeat. Success moves that
-    manager to the bottom of the order; failure leaves their position
-    unchanged so a follow-up claim (if any) is retried on the next scan.
-    """
     data = request.get_json() or {}
     gw = data.get('gw')
     if not gw:
@@ -3787,78 +3885,109 @@ def waiver_process():
 
     conn = get_db()
     try:
-        season = DRAFT_SEASON
-        window = get_open_waiver_window(conn, season)
-        if not window:
-            return jsonify({"error": "No waiver window is currently open."}), 409
-
-        order = [r['manager_id'] for r in get_waiver_order(conn, season)]
-
-        pending = {}
-        claims = conn.execute("""
-            SELECT * FROM waiver_claims WHERE window_id=? AND status='pending' ORDER BY manager_id, priority
-        """, (window['id'],)).fetchall()
-        for cl in claims:
-            pending.setdefault(cl['manager_id'], []).append(dict(cl))
-
-        claimed_this_run = set()
-        sequence = 0
-
-        while True:
-            next_manager = None
-            for m in order:
-                if pending.get(m):
-                    next_manager = m
-                    break
-            if next_manager is None:
-                break
-
-            claim = pending[next_manager][0]
-            sequence += 1
-
-            if claim['add_player'] in claimed_this_run:
-                fail_reason = f"{claim['add_player']} was already claimed earlier this window"
-                conn.execute(
-                    "UPDATE waiver_claims SET status='failed', fail_reason=?, sequence_number=? WHERE id=?",
-                    (fail_reason, sequence, claim['id'])
-                )
-                pending[next_manager].pop(0)
-                continue
-
-            ok, info = execute_roster_swap(conn, next_manager, claim['add_player'], claim['drop_player'], gw,
-                                            'waiver_claim', to_ir=bool(claim.get('to_ir')))
-            if ok:
-                conn.execute(
-                    "UPDATE waiver_claims SET status='success', sequence_number=? WHERE id=?",
-                    (sequence, claim['id'])
-                )
-                claimed_this_run.add(claim['add_player'])
-                pending[next_manager].pop(0)
-                order.remove(next_manager)
-                order.append(next_manager)
-            else:
-                conn.execute(
-                    "UPDATE waiver_claims SET status='failed', fail_reason=?, sequence_number=? WHERE id=?",
-                    (info['error'], sequence, claim['id'])
-                )
-                pending[next_manager].pop(0)
-
-        conn.execute("DELETE FROM waiver_order WHERE season=?", (season,))
-        for i, manager_id in enumerate(order, start=1):
-            conn.execute(
-                "INSERT INTO waiver_order (season, manager_id, position) VALUES (?, ?, ?)",
-                (season, manager_id, i)
-            )
-
-        conn.execute(
-            "UPDATE waiver_windows SET status='complete', closed_at=? WHERE id=?",
-            (now_eastern_naive().isoformat(), window['id'])
-        )
+        result = _do_process_waivers(conn, DRAFT_SEASON, gw, actor_manager_id=current_manager_id())
         conn.commit()
-        return jsonify({"status": "ok", "processed": sequence})
+        return jsonify(result)
+    except ValueError as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 409
     except Exception as e:
         conn.rollback()
         print(f"waiver_process error: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
+
+def get_last_kicked_off_gw_without_window(conn, season):
+    """The earliest gw N whose fixtures are all scheduled, whose LAST
+    kickoff was >= 2h ago, and for which no waiver_windows row (auto or
+    manual) has ever been created -- i.e. the next gw due for an automatic
+    waiver window. Returns None if nothing is due. Scans ascending so if
+    the app was down and multiple gws are overdue at once, they get opened
+    one at a time (the next poll picks up the next one)."""
+    gws = [r[0] for r in conn.execute(
+        "SELECT gw_number FROM gameweeks WHERE season=? ORDER BY gw_number", (season,)
+    ).fetchall()]
+    for gw in gws:
+        _, latest = get_gw_kickoff_bounds(conn, season, gw)
+        if latest is None or now_eastern_naive() < latest + timedelta(hours=2):
+            continue
+        already = conn.execute(
+            "SELECT 1 FROM waiver_windows WHERE season=? AND gw=?", (season, gw)
+        ).fetchone()
+        if not already:
+            return gw
+    return None
+
+
+def maybe_auto_transition_waiver_window(conn, season=None):
+    """One poll pass: check both halves of the automated waiver cycle and
+    fire at most one transition, mirroring maybe_auto_scrape()'s
+    check-and-fire-once shape.
+
+    OPEN: 2h after a gw's last kickoff, if no window has ever been opened
+    for that gw.
+
+    CLOSE: 48h before the following gw's first kickoff, auto-process
+    (close) the currently-open window. Fails safe if that gw's fixtures
+    aren't scheduled yet -- never force-closes without a computable
+    deadline; the window is simply left open and re-checked on the next
+    poll. Runs unguarded through playoff gameweeks (no gw cap) -- unlike
+    get_current_gw(), this never consults the 33-gw regular-season cap.
+    """
+    if season is None:
+        season = DRAFT_SEASON
+    open_window = get_open_waiver_window(conn, season)
+
+    if open_window is None:
+        due_gw = get_last_kicked_off_gw_without_window(conn, season)
+        if due_gw is None:
+            return {"action": "none"}
+        result = _do_open_waiver_window(conn, season, due_gw, actor_manager_id=None)
+        log_audit(conn, None, 'waiver', 'auto_open_window',
+                  f"Auto-opened waiver window #{result['window_number']} (GW{due_gw}), "
+                  f"2h after GW{due_gw}'s last kickoff")
+        conn.commit()
+        return {"action": "opened", "gw": due_gw, **result}
+
+    next_gw = open_window['gw'] + 1
+    earliest, _ = get_gw_kickoff_bounds(conn, season, next_gw)
+    if earliest is None or now_eastern_naive() < earliest - timedelta(hours=48):
+        return {"action": "none"}
+
+    result = _do_process_waivers(conn, season, next_gw, actor_manager_id=None)
+    log_audit(conn, None, 'waiver', 'auto_close_window',
+              f"Auto-processed waiver window #{open_window['window_number']} "
+              f"(GW{open_window['gw']}) — {result['processed']} claim(s), "
+              f"roster changes effective GW{next_gw}")
+    conn.commit()
+    return {"action": "closed", "gw": next_gw, **result}
+
+
+@app.route('/internal/waiver-window-sync', methods=['POST'])
+def waiver_window_sync_trigger():
+    """
+    Host-level scheduled job endpoint (e.g. a Render Cron Job, running
+    every 30 minutes) that opens a waiver window 2h after a gameweek's
+    last kickoff and auto-processes/closes it 48h before the following
+    gameweek's first kickoff. Guarded by the same shared-secret pattern as
+    /internal/auto-scrape-trigger. The manual "Open Waiver Window"/"Close &
+    Process Waivers" buttons in templates/history.html remain fully
+    independent -- a commissioner can still open/close an ad hoc extra
+    window at any time; this poller simply finds nothing to do on its next
+    run if a manual action already handled the transition.
+    """
+    secret = os.environ.get('INTERNAL_TRIGGER_SECRET')
+    if not secret or request.headers.get('X-Trigger-Secret') != secret:
+        return jsonify({"error": "unauthorized"}), 403
+    conn = get_db()
+    try:
+        result = maybe_auto_transition_waiver_window(conn)
+        return jsonify(result)
+    except Exception as e:
+        conn.rollback()
+        print(f"waiver_window_sync error: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
