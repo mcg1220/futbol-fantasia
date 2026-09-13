@@ -47,7 +47,7 @@ INCIDENT_TYPE_MAP = {
 # INCIDENT_TYPE_MAP below rather than mapped directly, to avoid falsely
 # crediting every last-man-tackle as an assist (LMT is tracked independently
 # via SATISFIER_STAT_MAP's "tacklelastman" satisfier).
-AMBIGUOUS_ASSIST_TYPE = "7"
+AMBIGUOUS_ASSIST_TYPE = ["7","8"]
 
 SATISFIER_STAT_MAP = {
     "yellowcard":           "yellow_cards",
@@ -144,7 +144,7 @@ def parse_incidents(row_html, player):
         if key in seen:
             continue
         seen.add(key)
-        if data_type == AMBIGUOUS_ASSIST_TYPE:
+        if data_type in AMBIGUOUS_ASSIST_TYPE:
             db_col = "assists" if "data-event-satisfier-assistother" in attrs else None
         else:
             db_col = INCIDENT_TYPE_MAP.get(data_type)
