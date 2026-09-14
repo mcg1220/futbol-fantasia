@@ -419,6 +419,23 @@ body.nav-open { overflow: hidden; }
 
   .matchup-vs { padding: 0 4px; font-size: 10px; }
 
+  /* ── Starting XI, position-aligned (matchup.html paired-starters rows) ── */
+
+  /* .matchup-vs-row used to wrap+reorder into three stacked lines (player A
+     full-width, then [pos, pts-a, pts-b], then player B full-width) --
+     technically no longer squeezed, but confusing to read since a player's
+     points ended up on a different line than their name. Keep it as one
+     row like desktop (removed that wrap/reorder in style.css) and just
+     shrink everything to fit instead, matching the same side-by-side
+     philosophy as the matchup card above. */
+  .matchup-vs-row { padding: 6px 6px; gap: 4px; }
+  .matchup-vs-name { font-size: 11px; }
+  .matchup-vs-club { font-size: 9px; gap: 2px; }
+  .matchup-vs-club .club-badge { width: 14px; height: 14px; }
+  .matchup-vs-opp { font-size: 8px; }
+  .matchup-vs-pts { font-size: 12px; width: 30px; }
+  .matchup-vs-pos.pos-badge { width: 26px; font-size: 9px; padding: 1px 4px; }
+
 
   /* ── Mobile-only elements ─────────────────────────────────────────────── */
 

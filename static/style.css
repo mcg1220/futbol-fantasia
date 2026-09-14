@@ -604,15 +604,6 @@ a.matchup-vs:hover { background: var(--bg-row-alt); color: var(--pl-magenta); }
   flex-shrink: 0;
 }
 .matchup-vs-pos { flex-shrink: 0; width: 44px; text-align: center; }
-@media (max-width: 700px) {
-  .matchup-vs-row { flex-wrap: wrap; }
-  .matchup-vs-player { flex-basis: 100%; }
-  .matchup-vs-player.mv-left { align-items: flex-start; text-align: left; order: 1; }
-  .matchup-vs-pos { order: 2; }
-  .matchup-vs-pts.mv-left { order: 3; }
-  .matchup-vs-pts.mv-right { order: 4; }
-  .matchup-vs-player.mv-right { order: 5; flex-basis: 100%; }
-}
 
 .matchup-bench-col {
   background: var(--bg-card);
