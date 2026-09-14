@@ -397,25 +397,27 @@ body.nav-open { overflow: hidden; }
 
   /* ── Matchup cards ─────────────────────────────────────────────────────── */
 
-  /* .matchup-card is a permanent horizontal flex row in style.css with no
-     mobile override before this — on a phone both .matchup-side panels get
-     squeezed to a sliver instead of stacking. Shared verbatim by
-     gameweek.html's matchup grid and matchup.html's detail-page header, so
-     this fixes both at once. */
-  .matchup-card { flex-direction: column; }
+  /* .matchup-card is a permanent horizontal flex row in style.css sized for
+     desktop (48px avatar, 20px name, 32px score) with no mobile override
+     before this — on a phone both .matchup-side panels get squeezed to
+     ~160px and everything overflows/wraps badly. Keep the same side-by-side
+     layout as desktop (not a vertical stack) but shrink it to actually fit:
+     stack each side's avatar above its name/team instead of beside it, and
+     scale down type sizes. Shared verbatim by gameweek.html's matchup grid
+     and matchup.html's detail-page header, so this fixes both at once. */
+  .matchup-side { padding: 12px 6px; gap: 2px; }
 
-  .matchup-side { padding: 16px; }
+  .matchup-identity { flex-direction: column; gap: 4px; }
+  .matchup-identity-text { align-items: center; text-align: center; }
 
-  /* Divider was a vertical bar between two side-by-side columns; reorient to
-     a horizontal bar between two stacked rows. */
-  .matchup-vs {
-    border-left: none;
-    border-right: none;
-    border-top: 1px solid var(--border);
-    border-bottom: 1px solid var(--border);
-    padding: 6px 0;
-    width: 100%;
-  }
+  .team-avatar-md { width: 32px; height: 32px; font-size: 14px; }
+  .matchup-manager { font-size: 13px; letter-spacing: 0.01em; }
+  .matchup-team { font-size: 10px; }
+  .matchup-score { font-size: 22px; margin-top: 4px; }
+  .matchup-badge { font-size: 9px; padding: 1px 6px; margin-top: 4px; }
+  .matchup-left-to-play { font-size: 9px; margin-top: 2px; }
+
+  .matchup-vs { padding: 0 4px; font-size: 10px; }
 
 
   /* ── Mobile-only elements ─────────────────────────────────────────────── */

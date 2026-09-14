@@ -2552,7 +2552,6 @@ def history():
             'avg_2026_27': s26['avg'],
             'next_opponent': next_match['opponent'] if next_match else None,
             'next_kickoff': (next_match['date'], next_match['time']) if next_match and next_match['date'] else None,
-            'stats': stat_sums_2025.get(p['name'], {}),
             'stats_2026': stat_sums_2026.get(p['name'], {}),
             'last5_pts': recent_form.get(p['name'], {}).get('total', 0.0),
             'last5_avg': recent_form.get(p['name'], {}).get('avg', 0.0),

@@ -87,17 +87,14 @@
             <th class="sortable col-extra" data-type="num" onclick="sortBrowse(9)" title="Total fantasy points over the last 5 games played">L5 FPts</th>
             <th class="sortable col-extra" data-type="num" onclick="sortBrowse(10)" title="Average fantasy points over the last 5 games played">L5 Avg</th>
             {% for key, label, title in stat_cols %}
-            <th class="sortable col-extra" data-type="num" onclick="sortBrowse({{ loop.index + 10 }})" title="2025-26 total {{ title }}">{{ label }}</th>
-            {% endfor %}
-            {% for key, label, title in stat_cols %}
-            <th class="sortable col-extra" data-type="num" onclick="sortBrowse({{ loop.index + 10 + stat_cols|length }})" title="2026-27 total {{ title }}">{{ label }} '27</th>
+            <th class="sortable col-extra" data-type="num" onclick="sortBrowse({{ loop.index + 10 }})" title="{{ title }} this season">{{ label }}</th>
             {% endfor %}
             <th class="no-export">Action</th>
           </tr>
         </thead>
         <tbody>
           {% for p in browse_players %}
-          <tr class="browse-row" data-player="{{ p.name|lower }} {{ p.club|lower }}" data-name="{{ p.name }}" data-owner="{{ p.owner_manager_id or '' }}" data-eligibility="{{ p.eligibility|join(',') }}" data-shortlisted="{{ '1' if p.name in my_shortlist else '' }}" data-stats='{{ p.stats|tojson }}'>
+          <tr class="browse-row" data-player="{{ p.name|lower }} {{ p.club|lower }}" data-name="{{ p.name }}" data-owner="{{ p.owner_manager_id or '' }}" data-eligibility="{{ p.eligibility|join(',') }}" data-shortlisted="{{ '1' if p.name in my_shortlist else '' }}" data-stats='{{ p.stats_2026|tojson }}'>
             <td style="text-align:left;font-weight:600" onclick="toggleHistory('{{ p.name|js_string }}')" class="player-name-cell">
               <span class="expand-caret">▸</span> {{ p.name }}
             </td>
@@ -127,9 +124,6 @@
             <td class="col-extra">{{ '%.2f'|format(p.last5_pts) }}</td>
             <td class="col-extra" title="{{ p.last5_games }} game{{ 's' if p.last5_games != 1 }}">{{ '%.2f'|format(p.last5_avg) }}</td>
             {% for key, label, title in stat_cols %}
-            <td class="col-extra">{{ p.stats.get(key) or 0 }}</td>
-            {% endfor %}
-            {% for key, label, title in stat_cols %}
             <td class="col-extra">{{ p.stats_2026.get(key) or 0 }}</td>
             {% endfor %}
             <td class="browse-action-cell">
@@ -146,7 +140,7 @@
             </td>
           </tr>
           <tr class="history-row" id="history-row-{{ loop.index }}" data-name="{{ p.name }}" style="display:none">
-            <td colspan="{{ 10 + 2 + 2 * stat_cols|length }}" class="game-log-table-wrap">
+            <td colspan="{{ 10 + 2 + stat_cols|length }}" class="game-log-table-wrap">
               <div class="player-history-panel" id="history-panel-{{ loop.index }}">Loading...</div>
             </td>
           </tr>
