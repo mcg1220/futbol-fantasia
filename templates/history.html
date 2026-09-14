@@ -84,6 +84,14 @@
             <th class="sortable col-2025" data-type="num" onclick="sortBrowse(6)">2025–26 Avg</th>
             <th class="sortable" data-type="num" onclick="sortBrowse(7)">2026–27 FPts</th>
             <th class="sortable col-extra" data-type="num" onclick="sortBrowse(8)">2026–27 Avg</th>
+            <th class="sortable col-extra" data-type="num" onclick="sortBrowse(9)" title="Total fantasy points over the last 5 games played">L5 FPts</th>
+            <th class="sortable col-extra" data-type="num" onclick="sortBrowse(10)" title="Average fantasy points over the last 5 games played">L5 Avg</th>
+            {% for key, label, title in stat_cols %}
+            <th class="sortable col-extra" data-type="num" onclick="sortBrowse({{ loop.index + 10 }})" title="2025-26 total {{ title }}">{{ label }}</th>
+            {% endfor %}
+            {% for key, label, title in stat_cols %}
+            <th class="sortable col-extra" data-type="num" onclick="sortBrowse({{ loop.index + 10 + stat_cols|length }})" title="2026-27 total {{ title }}">{{ label }} '27</th>
+            {% endfor %}
             <th class="no-export">Action</th>
           </tr>
         </thead>
@@ -116,6 +124,14 @@
             <td class="col-2025">{{ '%.2f'|format(p.avg_2025_26) }}</td>
             <td>{{ '%.2f'|format(p.pts_2026_27) }}</td>
             <td class="col-extra">{{ '%.2f'|format(p.avg_2026_27) }}</td>
+            <td class="col-extra">{{ '%.2f'|format(p.last5_pts) }}</td>
+            <td class="col-extra" title="{{ p.last5_games }} game{{ 's' if p.last5_games != 1 }}">{{ '%.2f'|format(p.last5_avg) }}</td>
+            {% for key, label, title in stat_cols %}
+            <td class="col-extra">{{ p.stats.get(key) or 0 }}</td>
+            {% endfor %}
+            {% for key, label, title in stat_cols %}
+            <td class="col-extra">{{ p.stats_2026.get(key) or 0 }}</td>
+            {% endfor %}
             <td class="browse-action-cell">
               <button type="button" class="shortlist-star" onclick="toggleShortlist('{{ p.name|js_string }}', this)" title="Shortlist">{{ '⭐' if p.name in my_shortlist else '☆' }}</button>
               {% if not p.owner_manager_id and as_manager_id %}
@@ -130,7 +146,7 @@
             </td>
           </tr>
           <tr class="history-row" id="history-row-{{ loop.index }}" data-name="{{ p.name }}" style="display:none">
-            <td colspan="10" class="game-log-table-wrap">
+            <td colspan="{{ 10 + 2 + 2 * stat_cols|length }}" class="game-log-table-wrap">
               <div class="player-history-panel" id="history-panel-{{ loop.index }}">Loading...</div>
             </td>
           </tr>

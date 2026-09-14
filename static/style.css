@@ -544,6 +544,12 @@ tr:nth-child(3) .rank-num, tr:nth-child(4) .rank-num { color: var(--pl-magenta);
   margin-top: 6px;
 }
 
+.matchup-left-to-play {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
 [data-theme="dark"] .badge-win { color: #18181B; }
 
 .matchup-vs {

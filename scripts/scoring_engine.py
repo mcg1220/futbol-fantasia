@@ -170,19 +170,20 @@ def calc_player_score(conn, player_name, match_id, position, season="2025-26"):
     return round(score, 2), breakdown
 
 
-def calc_bulk_season_totals(conn, season, match_id_filter=None):
+def _score_rows_bulk(conn, season, match_id_filter=None):
     """
-    Total fantasy points per player for every match in `season`, computed in
-    one pass instead of one calc_player_score() call per (player, match) —
-    the per-call version re-runs several small queries each time, which is
+    Shared one-pass raw_stats fetch + per-row scoring behind both
+    calc_bulk_season_totals and calc_bulk_recent_form — computed once
+    instead of one calc_player_score() call per (player, match), which is
     too slow across hundreds of players x dozens of matches.
 
     match_id_filter: optional (min, max) tuple to scope which raw_stats rows
     count as "this season" (mirrors the app's SEASON_CUTOFF heuristic, since
     raw_stats has no season column of its own).
 
-    Returns dict: player_name -> {'total': rounded total fantasy points,
-    'games': appearances, 'avg': rounded points per appearance}.
+    Returns dict: player_name -> list of (gw_number, match_id, score) tuples,
+    one per appearance, unsorted — callers decide how to reduce this (sum
+    everything for a season total, or take the most recent N for form).
     """
     c = conn.cursor()
     config = get_scoring_config(conn, season)
@@ -195,7 +196,7 @@ def calc_bulk_season_totals(conn, season, match_id_filter=None):
         params = [lo, hi]
 
     rows = c.execute(f"""
-        SELECT player_name, match_id, club, goals, assists, pk_saves,
+        SELECT player_name, match_id, gw_number, club, goals, assists, pk_saves,
                yellow_cards, red_cards, glc, lmt, elg, own_goals, motm,
                shots_on_target, key_passes, dribbles, tackles, interceptions,
                clearances, blocked_shots, saves, acc_crosses, acc_long_balls,
@@ -232,8 +233,7 @@ def calc_bulk_season_totals(conn, season, match_id_filter=None):
         "SELECT name, position FROM players"
     ).fetchall()}
 
-    totals = {}
-    games = {}
+    matches_by_player = {}
     for r in rows:
         name = r['player_name']
         pos = (positions.get(name) or 'MID').upper()
@@ -281,17 +281,58 @@ def calc_bulk_season_totals(conn, season, match_id_filter=None):
             if (r['minutes_played'] or 0) >= 60 and gc == 0:
                 score += config["clean_sheet"][0]
 
-        totals[name] = totals.get(name, 0.0) + score
-        games[name] = games.get(name, 0) + 1
+        matches_by_player.setdefault(name, []).append((r['gw_number'], r['match_id'], score))
 
+    return matches_by_player
+
+
+def calc_bulk_season_totals(conn, season, match_id_filter=None):
+    """
+    Total fantasy points per player for every match in `season`, computed in
+    one pass via _score_rows_bulk instead of one calc_player_score() call per
+    (player, match) — the per-call version re-runs several small queries
+    each time, which is too slow across hundreds of players x dozens of
+    matches.
+
+    Returns dict: player_name -> {'total': rounded total fantasy points,
+    'games': appearances, 'avg': rounded points per appearance}.
+    """
+    matches_by_player = _score_rows_bulk(conn, season, match_id_filter)
     return {
         name: {
-            'total': round(total, 2),
-            'games': games[name],
-            'avg': round(total / games[name], 2) if games[name] else 0.0,
+            'total': round(sum(s for _, _, s in ms), 2),
+            'games': len(ms),
+            'avg': round(sum(s for _, _, s in ms) / len(ms), 2) if ms else 0.0,
         }
-        for name, total in totals.items()
+        for name, ms in matches_by_player.items()
     }
+
+
+def calc_bulk_recent_form(conn, season, match_id_filter=None, num_games=5):
+    """
+    Per-player fantasy score over their most recent `num_games` appearances
+    in `season`, built on the same one-pass _score_rows_bulk computation as
+    calc_bulk_season_totals — no extra query, just a different reduction
+    (most recent N instead of a full-season sum). Recency is by
+    (gw_number, match_id) descending.
+
+    Returns dict: player_name -> {'games': n (<=num_games), 'total': rounded
+    total over those games, 'avg': rounded points per game}. Players with no
+    appearances in `season` are omitted.
+    """
+    matches_by_player = _score_rows_bulk(conn, season, match_id_filter)
+    out = {}
+    for name, ms in matches_by_player.items():
+        recent = sorted(ms, key=lambda t: (t[0], t[1]), reverse=True)[:num_games]
+        if not recent:
+            continue
+        total = sum(s for _, _, s in recent)
+        out[name] = {
+            'games': len(recent),
+            'total': round(total, 2),
+            'avg': round(total / len(recent), 2),
+        }
+    return out
 
 
 def calc_team_score_for_gw(conn, manager_id, gw_number, season="2025-26"):

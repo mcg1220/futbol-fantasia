@@ -174,6 +174,9 @@ cd scripts</pre>
         {% elif m.live_score_a is not none %}
           <span class="matchup-badge badge-live" title="Live total from matches scraped so far — not final until the whole gameweek is scraped">LIVE</span>
         {% endif %}
+        {% if not gw_locked and m.left_to_play_a is not none %}
+        <span class="matchup-left-to-play">{{ m.left_to_play_a }} left to play</span>
+        {% endif %}
       </a>
 
       <a href="/matchup/{{ m.id }}" class="matchup-vs" title="View full matchup">VS</a>
@@ -202,6 +205,9 @@ cd scripts</pre>
           {% else %}<span class="matchup-badge badge-tie">T</span>{% endif %}
         {% elif m.live_score_b is not none %}
           <span class="matchup-badge badge-live" title="Live total from matches scraped so far — not final until the whole gameweek is scraped">LIVE</span>
+        {% endif %}
+        {% if not gw_locked and m.left_to_play_b is not none %}
+        <span class="matchup-left-to-play">{{ m.left_to_play_b }} left to play</span>
         {% endif %}
       </a>
 

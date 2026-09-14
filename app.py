@@ -70,7 +70,7 @@ MEMES_DIR           = os.path.join(os.path.dirname(__file__), 'static', 'uploads
 ALLOWED_MEME_EXTS   = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 sys.path.insert(0, SCRIPTS_DIR)
-from scoring_engine import calc_player_score, get_scoring_config, calc_bulk_season_totals, get_team_goals_conceded, calc_team_score_for_gw
+from scoring_engine import calc_player_score, get_scoring_config, calc_bulk_season_totals, calc_bulk_recent_form, get_team_goals_conceded, calc_team_score_for_gw
 import world_cup_sim
 import scraper as scraper_lib
 # scraper.py's own save_to_db() assumes its module is run with cwd=scripts/
@@ -392,6 +392,34 @@ def is_gw_locked(conn, season, gw_number):
     nothing about it (starters, bench, IR) changes again."""
     _, latest = get_gw_kickoff_bounds(conn, season, gw_number)
     return latest is not None and now_eastern_naive() >= latest + timedelta(hours=6)
+
+
+def count_starters_left_to_play(conn, season, gw_number, manager_ids):
+    """For each manager_id, count starters (slot_type='starter', active at
+    gw_number) whose club's match isn't 'finished' yet -- not-yet-kicked-off
+    and in-progress both count, since their fantasy score could still move.
+    One rosters+players query for ALL managers at once (gameweek() needs
+    this for every matchup on the page, not just one), plus one
+    get_player_lock_state() call per distinct CLUB rather than per starter,
+    since many starters usually share a club. Returns {manager_id: count}."""
+    if not manager_ids:
+        return {}
+    placeholders = ','.join('?' * len(manager_ids))
+    starter_rows = conn.execute(f"""
+        SELECT r.manager_id, p.club
+        FROM rosters r JOIN players p ON p.name = r.player_name
+        WHERE r.manager_id IN ({placeholders}) AND r.slot_type = 'starter'
+          AND r.gw_start <= ? AND (r.gw_end IS NULL OR r.gw_end >= ?)
+    """, manager_ids + [gw_number, gw_number]).fetchall()
+
+    clubs = {r['club'] for r in starter_rows if r['club']}
+    club_lock_state = {club: get_player_lock_state(conn, season, gw_number, club) for club in clubs}
+
+    counts = {mid: 0 for mid in manager_ids}
+    for r in starter_rows:
+        if club_lock_state.get(r['club'], 'not_locked') != 'finished':
+            counts[r['manager_id']] += 1
+    return counts
 
 
 def is_change_locked(conn, season, gw_number, club, old_slot_type, new_slot_type):
@@ -1363,6 +1391,17 @@ def gameweek(gw=None):
             if m['score_b'] is None:
                 m['live_score_b'], _ = calc_team_score_for_gw(conn, m['team_b_id'], gw, season=season)
 
+    gw_locked = is_gw_locked(conn, season, gw)
+    if not gw_locked:
+        manager_ids = list({m['team_a_id'] for m in matchups} | {m['team_b_id'] for m in matchups})
+        left_to_play = count_starters_left_to_play(conn, season, gw, manager_ids)
+        for m in matchups:
+            m['left_to_play_a'] = left_to_play.get(m['team_a_id'])
+            m['left_to_play_b'] = left_to_play.get(m['team_b_id'])
+    else:
+        for m in matchups:
+            m['left_to_play_a'] = m['left_to_play_b'] = None
+
     fixture_rows = c.execute("""
         SELECT f.match_id, f.home_club, f.away_club, f.match_date, f.kickoff_time, f.goals_home, f.goals_away
         FROM fixtures f
@@ -1397,6 +1436,7 @@ def gameweek(gw=None):
         fully_scraped=fully_scraped,
         already_finalized=already_finalized,
         top_scorer=top_scorer,
+        gw_locked=gw_locked,
     )
 
 
@@ -2016,6 +2056,12 @@ def matchup_detail(matchup_id):
                 'b': b_group[i] if i < len(b_group) else None,
             })
 
+    gw_locked = is_gw_locked(conn, season, gw)
+    left_to_play = (
+        count_starters_left_to_play(conn, season, gw, [mu['team_a_id'], mu['team_b_id']])
+        if not gw_locked else {}
+    )
+
     conn.close()
     return render_template('matchup.html',
         matchup_id=matchup_id, gw=gw, season=season, badges=badges,
@@ -2030,6 +2076,9 @@ def matchup_detail(matchup_id):
         starters_b_total=starters_b_total, starters_b_avg=starters_b_avg,
         bench_a=side_a['bench'], bench_b=side_b['bench'],
         ir_a=side_a['ir'], ir_b=side_b['ir'],
+        gw_locked=gw_locked,
+        left_to_play_a=left_to_play.get(mu['team_a_id']),
+        left_to_play_b=left_to_play.get(mu['team_b_id']),
     )
 
 
@@ -2467,6 +2516,8 @@ def history():
     # call it once and reuse everything it returns.
     totals_2025, eligibility_by_player, stat_sums_2025, _projections = compute_full_player_stats(conn)
     totals_2026 = calc_bulk_season_totals(conn, '2026-27', match_id_filter=(SEASON_CUTOFF, 9_999_999))
+    stat_sums_2026 = compute_current_season_stat_sums(conn)
+    recent_form = calc_bulk_recent_form(conn, '2026-27', match_id_filter=(SEASON_CUTOFF, 9_999_999), num_games=5)
 
     # Players with no club (or at a relegated club) aren't in the current PL
     # player pool — exclude from browse, but their historical stats remain.
@@ -2502,6 +2553,10 @@ def history():
             'next_opponent': next_match['opponent'] if next_match else None,
             'next_kickoff': (next_match['date'], next_match['time']) if next_match and next_match['date'] else None,
             'stats': stat_sums_2025.get(p['name'], {}),
+            'stats_2026': stat_sums_2026.get(p['name'], {}),
+            'last5_pts': recent_form.get(p['name'], {}).get('total', 0.0),
+            'last5_avg': recent_form.get(p['name'], {}).get('avg', 0.0),
+            'last5_games': recent_form.get(p['name'], {}).get('games', 0),
         })
 
     manager_roster = []
@@ -4115,6 +4170,31 @@ def compute_full_player_stats(conn):
     ).fetchall()}
 
     return totals_2025, eligibility_by_player, stat_sums, projections
+
+
+def compute_current_season_stat_sums(conn):
+    """2026-27-only mirror of compute_full_player_stats's stat_sums GROUP BY
+    (same 21 raw-stat columns), scoped match_id >= SEASON_CUTOFF instead of
+    < SEASON_CUTOFF. Kept separate rather than added as a parameter there --
+    that function is intentionally 2025-26-only for the Draft page's
+    pre-season-scouting use case. Used by history() to sort/show current-
+    season raw-stat totals (e.g. "2026-27 total tackles") on Add/Drop."""
+    return {r['player_name']: dict(r) for r in conn.execute("""
+        SELECT player_name,
+               SUM(goals) AS goals, SUM(assists) AS assists,
+               SUM(shots_on_target) AS shots_on_target, SUM(key_passes) AS key_passes,
+               SUM(dribbles) AS dribbles, SUM(tackles) AS tackles,
+               SUM(interceptions) AS interceptions, SUM(clearances) AS clearances,
+               SUM(blocked_shots) AS blocked_shots, SUM(acc_crosses) AS acc_crosses,
+               SUM(acc_long_balls) AS acc_long_balls, SUM(saves) AS saves,
+               SUM(pk_saves) AS pk_saves, SUM(glc) AS glc, SUM(lmt) AS lmt,
+               SUM(elg) AS elg, SUM(own_goals) AS own_goals, SUM(motm) AS motm,
+               SUM(yellow_cards) AS yellow_cards, SUM(red_cards) AS red_cards,
+               SUM(minutes_played) AS minutes_played
+        FROM raw_stats
+        WHERE match_id >= ?
+        GROUP BY player_name
+    """, (SEASON_CUTOFF,)).fetchall()}
 
 
 # ── Shortlist ────────────────────────────────────────────────────────────────

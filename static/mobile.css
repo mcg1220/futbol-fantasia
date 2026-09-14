@@ -395,6 +395,29 @@ body.nav-open { overflow: hidden; }
   .team-switcher select { max-width: 100%; }
 
 
+  /* ── Matchup cards ─────────────────────────────────────────────────────── */
+
+  /* .matchup-card is a permanent horizontal flex row in style.css with no
+     mobile override before this — on a phone both .matchup-side panels get
+     squeezed to a sliver instead of stacking. Shared verbatim by
+     gameweek.html's matchup grid and matchup.html's detail-page header, so
+     this fixes both at once. */
+  .matchup-card { flex-direction: column; }
+
+  .matchup-side { padding: 16px; }
+
+  /* Divider was a vertical bar between two side-by-side columns; reorient to
+     a horizontal bar between two stacked rows. */
+  .matchup-vs {
+    border-left: none;
+    border-right: none;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    padding: 6px 0;
+    width: 100%;
+  }
+
+
   /* ── Mobile-only elements ─────────────────────────────────────────────── */
 
   /* Same pattern as .nav-toggle: these carry an inline style="display:none"
