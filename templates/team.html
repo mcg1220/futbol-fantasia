@@ -144,7 +144,7 @@
       </tr>
     </thead>
     <tbody>
-      {% set ns = namespace(cur_pos='', total_pts=0) %}
+      {% set ns = namespace(cur_pos='', total_pts=0, finished_count=0, finished_pts=0) %}
       {% for player in players %}
         {% set pos = (player.position_slot or '')|upper %}
         {% set is_gk      = pos == 'GK' %}
@@ -165,6 +165,7 @@
         {% set eligible = eligibility_map.get(player.player_name) %}
         {% set player_locked = locked_map.get(player.player_name, False) %}
         {% set lock_state = lock_state_map.get(player.player_name, 'not_locked') %}
+        {% if lock_state == 'finished' %}{% set ns.finished_count = ns.finished_count + 1 %}{% set ns.finished_pts = ns.finished_pts + pts.gw_score %}{% endif %}
         {% set start_status = start_status_map.get(player.player_name) %}
         {% set starter_locked = gw_locked or (player_locked and player.slot_type == 'starter') %}
         {% set starter_options_locked = gw_locked or player_locked %}
@@ -335,12 +336,11 @@
         </tr>
       {% endfor %}
       {% if show_total_row and players %}
-      {% set avg_pts = (ns.total_pts / players|length) if players|length else 0 %}
       <tr class="total-row">
         <td colspan="6" style="text-align:right;font-weight:700">Starting XI Total</td>
         <td class="pts-cell" style="font-weight:700">
           {{ "%.2f"|format(ns.total_pts) }}
-          <div class="pts-avg-note" title="Average points per starter this gameweek">avg {{ "%.2f"|format(avg_pts) }}</div>
+          <div class="pts-avg-note" title="Average points per starter whose game has finished ({{ ns.finished_count }} of {{ players|length }} so far)">avg {{ ("%.2f"|format(ns.finished_pts / ns.finished_count)) if ns.finished_count else '—' }}</div>
         </td>
         <td colspan="4"></td>
         <td class="season-col" colspan="2"></td>

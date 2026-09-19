@@ -2038,10 +2038,23 @@ def matchup_detail(matchup_id):
     # Starting XI total/average for this gw alone -- the row shown after
     # the GK row on the page, same "how good was my lineup this week"
     # snapshot as the Team page's roster table.
+    # The average only counts starters whose real match has finished -- an
+    # unplayed starter's 0.00 isn't a real score yet and would drag it down
+    # all weekend (None if nobody's finished, rendered as a dash).
+    club_lock_state = {}
+    def finished_avg(starters):
+        finished_scores = []
+        for r in starters:
+            if r['club'] not in club_lock_state:
+                club_lock_state[r['club']] = get_player_lock_state(conn, season, gw, r['club'])
+            if club_lock_state[r['club']] == 'finished':
+                finished_scores.append(r['gw_score'])
+        return round(sum(finished_scores) / len(finished_scores), 2) if finished_scores else None
+
     starters_a_total = round(sum(r['gw_score'] for r in side_a['starters']), 2)
-    starters_a_avg = round(starters_a_total / len(side_a['starters']), 2) if side_a['starters'] else 0.0
+    starters_a_avg = finished_avg(side_a['starters'])
     starters_b_total = round(sum(r['gw_score'] for r in side_b['starters']), 2)
-    starters_b_avg = round(starters_b_total / len(side_b['starters']), 2) if side_b['starters'] else 0.0
+    starters_b_avg = finished_avg(side_b['starters'])
 
     # One row per fantasy starting slot (2 FW, 4 MID, 4 DEF, 1 GK), pairing
     # both teams' Nth player at that position -- blank if a side is short.
