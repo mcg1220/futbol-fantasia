@@ -1,7 +1,7 @@
 """
 Fútbol de Fantasía - Badge Fetcher
 Fetches PL team badge URLs from TheSportsDB (free, no API key required).
-Saves results to data/badges.json.
+Saves results to badges.json (repo root -- see BADGES_PATH in app.py).
 
 Usage (run once from futbol_fantasia/ folder):
     python fetch_badges.py
@@ -13,7 +13,7 @@ import os
 import urllib.request
 import urllib.parse
 
-OUTPUT_PATH = os.path.join(os.path.dirname(__file__), 'data', 'badges.json')
+OUTPUT_PATH = os.path.join(os.path.dirname(__file__), 'badges.json')
 
 # Maps the team names stored in our DB → TheSportsDB search term
 TEAM_SEARCH_MAP = {

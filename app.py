@@ -63,7 +63,10 @@ def js_string_filter(value):
 DB_PATH             = os.path.join(os.path.dirname(__file__), 'data', 'fantasia.db')
 SCRAPER_STATUS_PATH = os.path.join(os.path.dirname(__file__), 'data', 'scraper_status.json')
 SCRIPTS_DIR         = os.path.join(os.path.dirname(__file__), 'scripts')
-BADGES_PATH         = os.path.join(os.path.dirname(__file__), 'data', 'badges.json')
+# Deliberately NOT under data/: on Render data/ is symlinked to the persistent
+# disk, and entrypoint.sh only seeds files onto it once -- a badges.json in
+# there would never pick up edits from a later deploy.
+BADGES_PATH         = os.path.join(os.path.dirname(__file__), 'badges.json')
 PHOTOS_DIR          = os.path.join(os.path.dirname(__file__), 'static', 'uploads', 'team_photos')
 ALLOWED_PHOTO_EXTS  = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 MEMES_DIR           = os.path.join(os.path.dirname(__file__), 'static', 'uploads', 'memes')
