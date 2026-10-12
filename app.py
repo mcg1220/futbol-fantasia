@@ -21,6 +21,54 @@ from flask import Flask, render_template, request, jsonify, session, redirect, u
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 
+# ── Error tracking (Sentry) ──────────────────────────────────────────────────
+# Entirely inert unless SENTRY_DSN is set (so local dev and tests never report),
+# and the import is guarded so an environment that hasn't re-run
+# `pip install -r requirements.txt` yet still boots.
+try:
+    import sentry_sdk
+except ImportError:
+    sentry_sdk = None
+
+
+def _init_sentry():
+    dsn = os.environ.get('SENTRY_DSN')
+    if not dsn or sentry_sdk is None:
+        return
+    from sentry_sdk.scrubber import EventScrubber, DEFAULT_DENYLIST
+    sentry_sdk.init(
+        dsn=dsn,
+        environment=os.environ.get('SENTRY_ENVIRONMENT', 'production'),
+        release=os.environ.get('RENDER_GIT_COMMIT'),  # set by Render; ties an issue to its deploy
+        send_default_pii=False,
+        # /login posts the PIN as a JSON body field, and PINs aren't in the SDK's
+        # default scrub list -- so don't ship request bodies at all.
+        max_request_body_size='never',
+        # The shared secret the cron jobs send in a header isn't in the default
+        # header scrub list either.
+        event_scrubber=EventScrubber(
+            denylist=list(DEFAULT_DENYLIST) + ['pin', 'confirm_pin', 'x-trigger-secret']
+        ),
+        traces_sample_rate=0,  # errors only; no performance tracing quota
+    )
+
+
+_init_sentry()
+
+
+def report_error(label):
+    """Call from inside an `except` block. Prints the traceback exactly as the
+    old inline print did (so Render logs are unchanged) and also sends it to
+    Sentry, tagged with which handler failed. Sentry's Flask integration only
+    sees exceptions that escape a view, and most routes here catch their own
+    errors and return a JSON 500 -- without this they'd be invisible to it."""
+    print(f"{label} error: {traceback.format_exc()}")
+    if sentry_sdk is not None:
+        with sentry_sdk.new_scope() as scope:
+            scope.set_tag("handler", label)
+            sentry_sdk.capture_exception()
+
+
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 8 * 1024 * 1024  # 8MB upload cap (memes: images/GIFs + flattened canvas exports)
 # Falls back to a fixed local-dev value so `python app.py` still works with no
@@ -34,6 +82,12 @@ app.secret_key = os.environ.get('SECRET_KEY', 'dev-only-insecure-key-set-SECRET_
 # below) plus this lifetime is what satisfies "don't make me log in every
 # time" — Flask refreshes the cookie's expiry on every response by default.
 app.permanent_session_lifetime = timedelta(days=90)
+
+
+@app.before_request
+def tag_sentry_manager():
+    if sentry_sdk is not None and session.get('manager_id'):
+        sentry_sdk.set_tag('manager_id', session['manager_id'])
 # Secure cookies need HTTPS, which is only true once actually deployed —
 # forcing it on for local `python app.py` over plain http would silently
 # break the cookie. Same FLASK_DEBUG convention used at the bottom of this
@@ -612,8 +666,8 @@ def run_scraper_background(proc, gw, started_at, trigger='manual', watchdog_kill
                     finalize_gw_results(fconn, gw, season=DRAFT_SEASON)
                 finally:
                     fconn.close()
-            except Exception as e:
-                print(f"[finalize_gw_results] GW{gw} failed: {e}")
+            except Exception:
+                report_error(f"finalize_gw_results GW{gw}")
             write_scraper_status({
                 "status":       "complete",
                 "summary":      summary,
@@ -3663,7 +3717,7 @@ def waiver_open():
         return jsonify({"error": str(e)}), 409
     except Exception as e:
         conn.rollback()
-        print(f"waiver_open error: {traceback.format_exc()}")
+        report_error("waiver_open")
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
@@ -3717,7 +3771,7 @@ def waiver_claim():
         return jsonify({"status": "ok"})
     except Exception as e:
         conn.execute("ROLLBACK")
-        print(f"waiver_claim error: {traceback.format_exc()}")
+        report_error("waiver_claim")
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
@@ -3764,7 +3818,7 @@ def waiver_claim_reorder(claim_id):
         return jsonify({"status": "ok"})
     except Exception as e:
         conn.rollback()
-        print(f"waiver_claim_reorder error: {traceback.format_exc()}")
+        report_error("waiver_claim_reorder")
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
@@ -3787,7 +3841,7 @@ def waiver_claim_delete(claim_id):
         return jsonify({"status": "ok"})
     except Exception as e:
         conn.rollback()
-        print(f"waiver_claim_delete error: {traceback.format_exc()}")
+        report_error("waiver_claim_delete")
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
@@ -3810,7 +3864,7 @@ def pending_waiver_claim_delete(claim_id):
         return jsonify({"status": "ok"})
     except Exception as e:
         conn.rollback()
-        print(f"pending_waiver_claim_delete error: {traceback.format_exc()}")
+        report_error("pending_waiver_claim_delete")
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
@@ -3852,7 +3906,7 @@ def waiver_claims_reorder_all():
         return jsonify({"status": "ok"})
     except Exception as e:
         conn.rollback()
-        print(f"waiver_claims_reorder_all error: {traceback.format_exc()}")
+        report_error("waiver_claims_reorder_all")
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
@@ -3963,7 +4017,7 @@ def waiver_process():
         return jsonify({"error": str(e)}), 409
     except Exception as e:
         conn.rollback()
-        print(f"waiver_process error: {traceback.format_exc()}")
+        report_error("waiver_process")
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
@@ -4057,7 +4111,7 @@ def waiver_window_sync_trigger():
         return jsonify(result)
     except Exception as e:
         conn.rollback()
-        print(f"waiver_window_sync error: {traceback.format_exc()}")
+        report_error("waiver_window_sync")
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
@@ -5068,7 +5122,7 @@ def transfer_pool_add(draft_type):
         return jsonify({"status": "ok"})
     except Exception as e:
         conn.rollback()
-        print(f"transfer_pool_add error: {traceback.format_exc()}")
+        report_error("transfer_pool_add")
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
@@ -5128,7 +5182,7 @@ def transfer_pool_add_new(draft_type):
         return jsonify({"status": "ok"})
     except Exception as e:
         conn.rollback()
-        print(f"transfer_pool_add_new error: {traceback.format_exc()}")
+        report_error("transfer_pool_add_new")
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
@@ -5153,7 +5207,7 @@ def transfer_pool_remove(draft_type, player_name):
         return jsonify({"status": "ok"})
     except Exception as e:
         conn.rollback()
-        print(f"transfer_pool_remove error: {traceback.format_exc()}")
+        report_error("transfer_pool_remove")
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
@@ -5236,7 +5290,7 @@ def transfer_draft_start(draft_type):
         return jsonify({"status": "ok"})
     except Exception as e:
         conn.rollback()
-        print(f"transfer_draft_start error: {traceback.format_exc()}")
+        report_error("transfer_draft_start")
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
@@ -5337,7 +5391,7 @@ def transfer_draft_pick(draft_type):
         return jsonify({"status": "ok"})
     except Exception as e:
         conn.rollback()
-        print(f"transfer_draft_pick error: {traceback.format_exc()}")
+        report_error("transfer_draft_pick")
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
@@ -5378,7 +5432,7 @@ def transfer_draft_pass(draft_type):
         return jsonify({"status": "ok"})
     except Exception as e:
         conn.rollback()
-        print(f"transfer_draft_pass error: {traceback.format_exc()}")
+        report_error("transfer_draft_pass")
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
@@ -5935,7 +5989,7 @@ def sync_fixture_schedule_trigger():
         })
     except Exception as e:
         conn.rollback()
-        print(f"sync_fixture_schedule error: {traceback.format_exc()}")
+        report_error("sync_fixture_schedule")
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
@@ -6075,7 +6129,7 @@ def sync_lineups_trigger():
         return jsonify({"status": "ok", **result})
     except Exception as e:
         conn.rollback()
-        print(f"sync_confirmed_lineups error: {traceback.format_exc()}")
+        report_error("sync_confirmed_lineups")
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()

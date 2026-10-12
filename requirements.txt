@@ -1,5 +1,6 @@
 Flask==3.0.3
 gunicorn==22.0.0
+sentry-sdk[flask]==2.71.0
 patchright==1.62.1
 pandas==3.0.3
 openpyxl==3.1.5
