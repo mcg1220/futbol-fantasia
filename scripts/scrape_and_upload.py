@@ -214,6 +214,20 @@ def upload(opener, site, match_id, gw, home_team, away_team, goals_home, goals_a
         sys.exit(1)
 
 
+# A total-count check alone let a scrape with an entire side missing through
+# (0 home + 20 away > 10), and with --rescrape that deleted the missing
+# side's existing rows. Every side always has at least its starting XI.
+MIN_PLAYERS_PER_SIDE = 11
+
+
+def squad_problem(players, home_team, away_team):
+    home = sum(1 for p in players if p.get("club") == home_team)
+    away = sum(1 for p in players if p.get("club") == away_team)
+    if home < MIN_PLAYERS_PER_SIDE or away < MIN_PLAYERS_PER_SIDE:
+        return f"only {home} {home_team or 'home'} / {away} {away_team or 'away'} players captured"
+    return None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--match_id", type=str, required=True,
@@ -243,8 +257,9 @@ def main():
         print(f"\n[{i}/{len(match_ids)}] match_id={match_id}")
         try:
             players, home_team, away_team, goals_home, goals_away = scrape_match_plain_playwright(match_id)
-            if len(players) < scraper.MIN_EXPECTED_PLAYERS:
-                print("  Scrape failed (not enough players captured) -- not uploading this one.")
+            problem = squad_problem(players, home_team, away_team)
+            if problem:
+                print(f"  Scrape incomplete ({problem}) -- NOT uploading this one; re-run it.")
                 failed.append(match_id)
                 continue
             print(f"  Uploading to {args.site}...")
