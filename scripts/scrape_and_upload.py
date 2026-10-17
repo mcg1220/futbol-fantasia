@@ -62,6 +62,38 @@ DEFAULT_SITE = "https://futbol-fantasia.onrender.com"
 DELAY_BETWEEN_MATCHES_SECONDS = (10, 20)
 
 
+SITE_DOWN_RETRY_WAIT_SECONDS = 30
+
+
+class WhoScoredDown(Exception):
+    pass
+
+
+def load_match_page(page, url, attempts=3, wait=SITE_DOWN_RETRY_WAIT_SECONDS):
+    """goto, but treat WhoScored's own server errors (Cloudflare serving a
+    "502: Bad gateway" page -- no exception, just the wrong page) as a
+    failure worth retrying, and say so plainly instead of letting it surface
+    later as a cryptic `.home .team-link` locator timeout."""
+    last = None
+    for attempt in range(1, attempts + 1):
+        try:
+            resp = page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            status = resp.status if resp else None
+            title = page.title()
+            if (status is not None and status >= 500) or "bad gateway" in title.lower():
+                last = f"HTTP {status} ({title})"
+            else:
+                return
+        except Exception as e:
+            last = f"{type(e).__name__}: {e}"
+        if attempt < attempts:
+            print(f"    ⚠️  WhoScored isn't serving the page ({last}) -- attempt {attempt}/{attempts}, "
+                  f"waiting {wait}s and retrying...")
+            time.sleep(wait)
+    raise WhoScoredDown(f"WhoScored is down or erroring ({last}) -- nothing wrong on our side, "
+                        f"try this match again later")
+
+
 def scrape_match_plain_playwright(match_id):
     """Same flow as scraper.py's scrape_match(), but with plain playwright
     + a custom desktop UA instead of scraper.py's current patchright setup."""
@@ -84,8 +116,7 @@ def scrape_match_plain_playwright(match_id):
             page.route("**/*.{png,jpg,jpeg,gif,woff,woff2}", lambda route: route.abort())
 
             print("  Loading page...")
-            if not scraper.goto_with_retry(page, url, timeout=60000, retries=2):
-                raise Exception(f"Could not load match page after retries: {url}")
+            load_match_page(page, url)
             time.sleep(5)
 
             scraper.accept_cookies(page)
@@ -118,7 +149,15 @@ def scrape_match_plain_playwright(match_id):
                     tab_failures.append(f"away/{tab}")
 
             print("  Scraping saves...")
-            scraper.scrape_saves(page, match_id, home_team, away_team, home_players, away_players)
+            # Saves feed goalkeeper points. Uploading without them silently
+            # under-scores both keepers, and a normal re-run won't repair it
+            # (existing rows are skipped), so retry once and otherwise refuse.
+            if not scraper.scrape_saves(page, match_id, home_team, away_team, home_players, away_players):
+                print(f"    ⚠️  Saves failed -- waiting {SITE_DOWN_RETRY_WAIT_SECONDS}s and trying once more...")
+                time.sleep(SITE_DOWN_RETRY_WAIT_SECONDS)
+                if not scraper.scrape_saves(page, match_id, home_team, away_team, home_players, away_players):
+                    raise Exception("could not get goalkeeper saves -- NOT uploading this match "
+                                    "(partial data would under-score both keepers); re-run it later")
         finally:
             browser.close()
 

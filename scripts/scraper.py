@@ -363,7 +363,7 @@ def scrape_saves(page, match_id, home_team, away_team, home_players, away_player
         live_url = f"https://www.whoscored.com/matches/{match_id}/live"
         if not goto_with_retry(page, live_url, timeout=30000, retries=2):
             print("  Warning: could not load saves page after retries — saves will be missing")
-            return
+            return False
         time.sleep(3)
         dismiss_overlays(page)
 
@@ -404,9 +404,11 @@ def scrape_saves(page, match_id, home_team, away_team, home_players, away_player
 
         assign_saves(home_players, home_saves, home_team)
         assign_saves(away_players, away_saves, away_team)
+        return True
 
     except Exception as e:
         print(f"  Warning: could not scrape saves: {e}")
+        return False
 
 
 def scrape_match(match_id, headless=True):
