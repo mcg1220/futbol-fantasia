@@ -1781,13 +1781,13 @@ def team(manager_id):
         r['player_name']: get_player_lock_state(conn, season, current_gw, club_map.get(r['player_name']))
         for r in roster_rows
     }
-    start_status_map = {
-        r['player_name']: r['status']
-        for r in c.execute(
-            "SELECT player_name, status FROM player_start_status WHERE gw=? AND season=?",
-            (current_gw, season)
-        ).fetchall()
-    }
+    start_status_rows = c.execute(
+        "SELECT player_name, status, updated_by FROM player_start_status WHERE gw=? AND season=?",
+        (current_gw, season)
+    ).fetchall()
+    start_status_map = {r['player_name']: r['status'] for r in start_status_rows}
+    # updated_by NULL = set by the confirmed-lineup sync, not a manager
+    start_status_auto = {r['player_name'] for r in start_status_rows if r['updated_by'] is None}
 
     # ── Plan Future Lineup: pre-set a later, not-yet-locked gw's lineup ────
     all_gws = [r[0] for r in c.execute(
@@ -1911,6 +1911,7 @@ def team(manager_id):
         locked_map=locked_map,
         lock_state_map=lock_state_map,
         start_status_map=start_status_map,
+        start_status_auto=start_status_auto,
         future_gws=future_gws,
         plan_gw=plan_gw,
         plan_starters=plan_starters,
@@ -6004,13 +6005,14 @@ def sync_fixture_schedule_trigger():
 # had already flipped from "predicted" to "standard" (the same value seen on
 # an already-finished match, i.e. the real XI that actually played).
 #
-# Deliberately one-directional: only ever sets 'starting', never
-# 'not_starting'. A player_start_status of 'not_starting' can talk a manager
-# out of starting someone who actually is -- if this feature's name-matching
-# ever misses a real starter (an accent/spelling gap), the failure mode
-# must be "left blank, exactly like today" (safe), never "wrongly marked
-# benched" (costs someone real fantasy points, exactly the risk this whole
-# feature exists to reduce, not add to).
+# Originally only ever set 'starting'; after it proved reliable it now also
+# sets 'not_starting', but cautiously, because a wrong 'not_starting' can talk
+# a manager out of starting a real starter. A rostered player is only marked
+# not starting when (a) his club is one of the two clubs in that confirmed
+# lineup, (b) that club's confirmed XI has a full 11 names, and (c) no part of
+# his name appears anywhere in that XI -- so a spelling variant ("Louie" vs
+# "Lewis" Koumas) leaves him blank rather than wrongly benched. Rows a manager
+# set by hand (updated_by not NULL) are never overwritten with 'not_starting'.
 
 LINEUP_CHECK_WINDOW = timedelta(minutes=75)  # start looking for a confirmed lineup at most this long before kickoff
 
@@ -6043,6 +6045,17 @@ def _normalize_name(name):
     return ''.join(c for c in decomposed if not unicodedata.combining(c)).lower().strip()
 
 
+def _confidently_absent(player_name, starters):
+    """True only if no word of the player's name (3+ letters) appears in any
+    starter's name -- so a spelling/naming variant counts as 'maybe present'
+    and the player is left unmarked rather than wrongly benched."""
+    ours = {t for t in _normalize_name(player_name).replace('-', ' ').split() if len(t) >= 3}
+    theirs = set()
+    for n in starters:
+        theirs |= set(_normalize_name(n).replace('-', ' ').split())
+    return bool(ours) and not (ours & theirs)
+
+
 def sync_confirmed_lineups(conn, season=DRAFT_SEASON):
     """For every fixture kicking off soon (within LINEUP_CHECK_WINDOW) whose
     result isn't in yet, checks FotMob for a confirmed lineup and marks any
@@ -6053,13 +6066,13 @@ def sync_confirmed_lineups(conn, season=DRAFT_SEASON):
     Does not commit -- caller commits. Returns a summary dict."""
     now = now_eastern_naive()
     candidates = conn.execute("""
-        SELECT f.id, f.fotmob_id, f.match_date, f.kickoff_time, g.gw_number
+        SELECT f.id, f.fotmob_id, f.match_date, f.kickoff_time, f.home_club, f.away_club, g.gw_number
         FROM fixtures f JOIN gameweeks g ON g.id = f.gw_id
         WHERE f.season=? AND f.fotmob_id IS NOT NULL AND f.goals_home IS NULL
           AND f.match_date IS NOT NULL AND f.kickoff_time IS NOT NULL
     """, (season,)).fetchall()
 
-    checked, confirmed, marked_starting, errors = 0, 0, [], []
+    checked, confirmed, marked_starting, marked_not_starting, errors = 0, 0, [], [], []
     for row in candidates:
         kickoff = datetime.strptime(f"{row['match_date']} {row['kickoff_time']}", '%Y-%m-%d %H:%M')
         if not (now <= kickoff <= now + LINEUP_CHECK_WINDOW):
@@ -6096,10 +6109,35 @@ def sync_confirmed_lineups(conn, season=DRAFT_SEASON):
             """, (r['player_name'], row['gw_number'], season, now.isoformat()))
             marked_starting.append(f"GW{row['gw_number']}: {r['player_name']}")
 
+        team_starters = {row['home_club']: home_starters, row['away_club']: away_starters}
+        players_in_match = conn.execute("""
+            SELECT DISTINCT r.player_name, p.club FROM rosters r JOIN players p ON p.name = r.player_name
+            WHERE r.gw_start<=? AND (r.gw_end IS NULL OR r.gw_end>=?) AND p.club IN (?, ?)
+        """, (row['gw_number'], row['gw_number'], row['home_club'], row['away_club'])).fetchall()
+        for r in players_in_match:
+            starters = team_starters.get(r['club']) or []
+            if len(starters) < 11:
+                continue  # incomplete XI from FotMob -- don't judge anyone on it
+            if not _confidently_absent(r['player_name'], starters):
+                continue
+            existing = conn.execute("""
+                SELECT status, updated_by FROM player_start_status WHERE player_name=? AND gw=? AND season=?
+            """, (r['player_name'], row['gw_number'], season)).fetchone()
+            if existing and (existing['updated_by'] is not None or existing['status'] == 'not_starting'):
+                continue  # a manager's own mark wins; or already recorded
+            conn.execute("""
+                INSERT INTO player_start_status (player_name, gw, season, status, updated_by, updated_at)
+                VALUES (?, ?, ?, 'not_starting', NULL, ?)
+                ON CONFLICT(player_name, gw, season) DO UPDATE SET
+                    status='not_starting', updated_by=NULL, updated_at=excluded.updated_at
+            """, (r['player_name'], row['gw_number'], season, now.isoformat()))
+            marked_not_starting.append(f"GW{row['gw_number']}: {r['player_name']}")
+
     return {
         "checked": checked,
         "confirmed": confirmed,
         "marked_starting": marked_starting,
+        "marked_not_starting": marked_not_starting,
         "errors": errors,
     }
 
@@ -6118,11 +6156,12 @@ def sync_lineups_trigger():
     conn = get_db()
     try:
         result = sync_confirmed_lineups(conn)
-        if result['marked_starting'] or result['errors']:
+        if result['marked_starting'] or result['marked_not_starting'] or result['errors']:
             log_audit(conn, None, 'roster', 'lineup_sync',
                       f"Confirmed-lineup sync: checked {result['checked']}, "
                       f"{result['confirmed']} confirmed, "
                       f"{len(result['marked_starting'])} player(s) marked starting, "
+                      f"{len(result['marked_not_starting'])} marked not starting, "
                       f"{len(result['errors'])} error(s)",
                       result)
         conn.commit()

@@ -1439,3 +1439,18 @@ a.matchup-vs:hover { background: var(--bg-row-alt); color: var(--pl-magenta); }
 .snake-cell-picked { background: var(--pl-magenta-bg); }
 .snake-cell-current { outline: 2px solid var(--pl-magenta); outline-offset: -2px; background: var(--pl-green-bg); }
 .transfer-matrix-divider { text-align: center; font-size: 11px; color: var(--text-muted); background: var(--bg-thead); padding: 4px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+
+/* ── "Started?" chip on the Team page ──────────────────────────────────── */
+.start-status-btn {
+  width: 26px; height: 26px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1.5px solid var(--border); border-radius: 6px;
+  background: transparent; color: var(--text-muted);
+  font-size: 15px; font-weight: 700; line-height: 1;
+  cursor: pointer; transition: border-color 0.15s, background 0.15s;
+}
+.start-status-btn:hover:not(:disabled) { border-color: var(--text-secondary); }
+.start-status-btn:focus-visible { outline: 2px solid var(--pl-magenta); outline-offset: 2px; }
+.start-status-btn:disabled { cursor: default; }
+.start-status-btn.is-starting { background: var(--pl-green-bg); border-color: var(--pl-green); color: var(--pl-green); }
+.start-status-btn.is-not-starting { background: var(--red-bg); border-color: var(--red-loss); color: var(--red-loss); }

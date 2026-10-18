@@ -224,14 +224,16 @@
             {% endif %}
           </td>
           <td onclick="event.stopPropagation()">
+            {% set start_auto = start_status and player.player_name in start_status_auto %}
             <button type="button"
-                    class="start-status-btn"
+                    class="start-status-btn{% if start_status == 'starting' %} is-starting{% elif start_status == 'not_starting' %} is-not-starting{% endif %}"
                     data-player="{{ player.player_name }}"
                     data-gw="{{ current_gw }}"
                     data-status="{{ start_status or '' }}"
                     {% if manager.id != current_manager_id %}disabled{% endif %}
-                    title="{% if manager.id != current_manager_id %}Only {{ manager.name }} can set this{% elif start_status == 'starting' %}Recorded as starting — click to mark not starting{% elif start_status == 'not_starting' %}Recorded as not starting — click to clear{% else %}Not recorded — click to mark starting{% endif %}"
-                    onclick="cycleStartStatus(this)">{% if start_status == 'starting' %}✅{% elif start_status == 'not_starting' %}❌{% else %}⬜{% endif %}</button>
+                    title="{% if start_status == 'starting' %}Starting{% elif start_status == 'not_starting' %}Not starting{% else %}Not recorded yet{% endif %}{% if start_status %} ({{ 'from the confirmed lineup' if start_auto else 'set by a manager' }}){% endif %}{% if manager.id != current_manager_id %} · only {{ manager.name }} can change this{% elif start_status == 'starting' %} · click to mark not starting{% elif start_status == 'not_starting' %} · click to clear{% else %} · click to mark starting{% endif %}"
+                    aria-label="Started?"
+                    onclick="cycleStartStatus(this)">{% if start_status == 'starting' %}✓{% elif start_status == 'not_starting' %}✕{% endif %}</button>
           </td>
           <td style="text-align:left">
             {% if opp != '—' and badges.get(opp) %}<img src="{{ badges[opp] }}" class="club-badge" />{% endif %}
@@ -772,9 +774,16 @@ async function updateSlot(selectEl) {
   }
 }
 
-// ── Manual "actually starting" tri-state (blank -> ✅ -> ❌ -> blank) ───────
+// ── Manual "actually starting" tri-state (blank -> ✓ -> ✕ -> blank) ───────
+// The confirmed-lineup sync fills these in automatically; a manager's click
+// always overrides it.
 const START_STATUS_CYCLE = { '': 'starting', 'starting': 'not_starting', 'not_starting': '' };
-const START_STATUS_ICON  = { '': '⬜', 'starting': '✅', 'not_starting': '❌' };
+const START_STATUS_ICON  = { '': '', 'starting': '✓', 'not_starting': '✕' };
+const START_STATUS_TITLE = {
+  '': 'Not recorded yet · click to mark starting',
+  'starting': 'Starting (set by a manager) · click to mark not starting',
+  'not_starting': 'Not starting (set by a manager) · click to clear',
+};
 
 async function cycleStartStatus(btn) {
   const player_name = btn.dataset.player;
@@ -796,6 +805,9 @@ async function cycleStartStatus(btn) {
     }
     btn.dataset.status = next;
     btn.textContent = START_STATUS_ICON[next];
+    btn.title = START_STATUS_TITLE[next];
+    btn.classList.toggle('is-starting', next === 'starting');
+    btn.classList.toggle('is-not-starting', next === 'not_starting');
   } catch (e) {
     alert('Network error saving change — please try again.');
   } finally {
