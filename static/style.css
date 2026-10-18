@@ -1442,11 +1442,11 @@ a.matchup-vs:hover { background: var(--bg-row-alt); color: var(--pl-magenta); }
 
 /* ── "Started?" chip on the Team page ──────────────────────────────────── */
 .start-status-btn {
-  width: 26px; height: 26px; padding: 0;
+  width: 20px; height: 20px; padding: 0;
   display: inline-flex; align-items: center; justify-content: center;
-  border: 1.5px solid var(--border); border-radius: 6px;
+  border: 1px solid var(--border); border-radius: 5px;
   background: transparent; color: var(--text-muted);
-  font-size: 15px; font-weight: 700; line-height: 1;
+  font-size: 12px; font-weight: 700; line-height: 1;
   cursor: pointer; transition: border-color 0.15s, background 0.15s;
 }
 .start-status-btn:hover:not(:disabled) { border-color: var(--text-secondary); }
