@@ -173,7 +173,7 @@ def get_db():
 
 LOGIN_EXEMPT_PATHS_EXACT = {
     '/login', '/internal/auto-scrape-trigger', '/internal/sync-fixture-schedule', '/internal/sync-lineups',
-    '/internal/waiver-window-sync',
+    '/internal/waiver-window-sync', '/internal/tick',
     # World Cup draft-randomizer generator — pure RNG, no DB writes, no
     # manager identity needed to watch it run (see /draft-randomizer-poc
     # and the real /draft page). The endpoint that actually persists a
@@ -6172,6 +6172,57 @@ def sync_lineups_trigger():
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
+
+
+@app.route('/internal/tick', methods=['POST'])
+def internal_tick_trigger():
+    """
+    Single entry point for ONE Render Cron Job running every 15 minutes
+    (Render bills a $1/month minimum per cron job, so one job instead of
+    three saves ~$2/month). Runs the same handlers the separate jobs used to:
+      - lineup sync:        every tick (was */15)
+      - waiver-window sync: ticks at :00 and :30 (was */30)
+      - fixture schedule:   the :00 tick (was hourly)
+    Each job runs independently so one failing doesn't skip the others; the
+    response is 500 if any failed, so Render still flags the run as failed.
+    Pass ?jobs=lineups,waivers,fixtures to force specific jobs regardless
+    of the clock. The old per-job endpoints still work on their own.
+    """
+    secret = os.environ.get('INTERNAL_TRIGGER_SECRET')
+    if not secret or request.headers.get('X-Trigger-Secret') != secret:
+        return jsonify({"error": "unauthorized"}), 403
+
+    handlers = {
+        'lineups': sync_lineups_trigger,
+        'waivers': waiver_window_sync_trigger,
+        'fixtures': sync_fixture_schedule_trigger,
+    }
+    forced = request.args.get('jobs')
+    if forced:
+        jobs = [j.strip() for j in forced.split(',') if j.strip() in handlers]
+    else:
+        # Cron fires a few seconds after :00/:15/:30/:45, so the quarter-hour
+        # slot is reliable.
+        slot = datetime.utcnow().minute // 15  # 0..3
+        jobs = ['lineups']
+        if slot in (0, 2):
+            jobs.append('waivers')
+        if slot == 0:
+            jobs.append('fixtures')
+
+    results, failed = {}, False
+    for name in jobs:
+        try:
+            rv = handlers[name]()
+            resp, status = (rv if isinstance(rv, tuple) else (rv, 200))
+            results[name] = resp.get_json()
+            if status >= 400:
+                failed = True
+        except Exception as e:
+            report_error(f"tick_{name}")
+            results[name] = {"error": str(e)}
+            failed = True
+    return jsonify({"ran": jobs, "results": results}), (500 if failed else 200)
 
 
 # ── World Cup draft-randomizer ──────────────────────────────────────────────
