@@ -15,6 +15,7 @@ import time
 import re
 from patchright.sync_api import sync_playwright
 from init_db import DB_PATH
+import player_sync
 
 # ── Confirmed stat cell class names from WhoScored HTML inspection ─────────────
 STAT_CLASS_MAP = {
@@ -552,17 +553,19 @@ def save_to_db(players, match_id, gw_number, home_team, away_team,
             p["interceptions"], p["clearances"], p["blocked_shots"], p["saves"],
             p["acc_crosses"], p["acc_long_balls"], p["minutes_played"]
         ))
-        # Persist WhoScored player ID for future position-eligibility re-scrapes
-        if p.get("player_id"):
-            c.execute(
-                "UPDATE players SET whoscored_id=? WHERE name=? AND whoscored_id IS NULL",
-                (p["player_id"], p["player_name"])
-            )
         inserted += 1
+
+    # Add newcomers / fix spellings, clubs and pickability in `players` so
+    # everyone who plays becomes pickable (see player_sync.py). Same transaction.
+    sync = player_sync.sync_players(conn, players)
 
     conn.commit()
     conn.close()
     print(f"  Saved {inserted} rows for match {match_id} (GW{gw_number}).")
+    for k in ('added', 'renamed', 'made_pickable', 'club_updated', 'flags'):
+        if sync[k]:
+            print(f"  players {k}: {sync[k]}")
+    return sync
 
 
 MIN_EXPECTED_PLAYERS = 10  # two full squads is ~30-36; anything under this means the scrape effectively failed

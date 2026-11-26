@@ -129,14 +129,19 @@ def search(p, query, name, club):
     return [c[0] for c in ordered[:4]], f"{len(cands)} search result(s)"
 
 
-def profile_positions(p, wsid, club):
+def profile_positions(p, wsid, club=None):
+    """Positions from a WhoScored profile, first listed = primary. With a
+    club, refuses a profile whose Current Team doesn't match (search can
+    return other people with the same name); pass None when the ID came off
+    a match page and is already known to be right."""
     title, body, _ = fetch(p, f"https://www.whoscored.com/players/{wsid}/show/")
     if 'Cloudflare' in title:
         return None, [], 'blocked by Cloudflare on profile'
-    team = re.search(r'Current Team:(.*?)(?:Shirt Number|Age:|Height:|Nationality:|Positions:)', body, re.S)
-    team = ' '.join(team.group(1).split()) if team else ''
-    if not (club_words(club or '') & set(norm(team).split())):
-        return None, [], f'wrong player (current team {team!r})'
+    if club is not None:
+        team = re.search(r'Current Team:(.*?)(?:Shirt Number|Age:|Height:|Nationality:|Positions:)', body, re.S)
+        team = ' '.join(team.group(1).split()) if team else ''
+        if not (club_words(club) & set(norm(team).split())):
+            return None, [], f'wrong player (current team {team!r})'
     m = re.search(r'Positions:[^\S\n]*([^\n]+)', body)
     if not m:
         return None, [], 'no Positions line on profile'

@@ -183,7 +183,7 @@ def login(opener, site, manager_id, pin):
         sys.exit(1)
 
 
-UPLOAD_PLAYER_FIELDS = set(scraper.empty_player("", "").keys()) | {"player_id"}
+UPLOAD_PLAYER_FIELDS = set(scraper.empty_player("", "").keys()) | {"player_id", "position"}
 
 
 def clean_players_for_upload(players):
@@ -212,6 +212,54 @@ def upload(opener, site, match_id, gw, home_team, away_team, goals_home, goals_a
     except urllib.error.HTTPError as e:
         print(f"Upload failed: {e.read().decode()}")
         sys.exit(1)
+
+
+def report_player_sync(sync):
+    """What the upload changed in the player list (see player_sync.py)."""
+    for a in sync.get("added", []):
+        print(f"  + New player added: {a['name']} ({a['club']}, {a['position'] or 'position pending'})")
+    for r in sync.get("renamed", []):
+        print(f"  ~ Renamed to WhoScored's new spelling: {r}")
+    for n in sync.get("made_pickable", []):
+        print(f"  ~ Now pickable: {n}")
+    for c in sync.get("club_updated", []):
+        print(f"  ~ Club updated: {c}")
+    for f in sync.get("flags", []):
+        print(f"  ⚠️  Needs a look (left unchanged): {f}")
+
+
+def send_profile_positions(opener, site, added):
+    """New players were added with the position from their lineup slot in this
+    one match. Read each one's WhoScored profile (works from here, not from
+    Render) for his full position list and send it to the site. Failures just
+    leave the match-slot position in place."""
+    from scrape_new_player_positions import profile_positions
+    found = {}
+    with sync_playwright() as p:
+        for a in added:
+            time.sleep(random.uniform(4, 8))
+            try:
+                primary, order, note = profile_positions(p, a["whoscored_id"])
+            except Exception as e:
+                primary, order, note = None, [], str(e)
+            if primary:
+                found[str(a["whoscored_id"])] = order
+                print(f"    {a['name']}: WhoScored profile says {'/'.join(order)}")
+            else:
+                print(f"    {a['name']}: couldn't read profile positions ({note}) -- keeping "
+                      f"{a['position'] or 'none; not pickable until positions are set'}")
+    if not found:
+        return
+    req = urllib.request.Request(
+        f"{site}/api/players/positions", method="POST",
+        data=json.dumps({"positions": found}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with opener.open(req, timeout=60) as resp:
+            print(f"    Positions saved: {json.loads(resp.read()).get('updated')}")
+    except urllib.error.HTTPError as e:
+        print(f"    Saving positions failed: {e.read().decode()}")
 
 
 # A total-count check alone let a scrape with an entire side missing through
@@ -265,7 +313,11 @@ def main():
             print(f"  Uploading to {args.site}...")
             result = upload(opener, args.site, match_id, args.gw, home_team, away_team,
                              goals_home, goals_away, players, rescrape=args.rescrape)
+            sync = result.pop("players_sync", None) or {}
             print(f"  Done: {result}")
+            report_player_sync(sync)
+            if sync.get("added"):
+                send_profile_positions(opener, args.site, sync["added"])
             succeeded.append(match_id)
         except Exception as e:
             print(f"  Error on match {match_id}: {e}")

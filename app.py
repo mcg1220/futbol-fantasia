@@ -130,6 +130,7 @@ sys.path.insert(0, SCRIPTS_DIR)
 from scoring_engine import calc_player_score, get_scoring_config, calc_bulk_season_totals, calc_bulk_recent_form, get_team_goals_conceded, calc_team_score_for_gw
 import world_cup_sim
 import scraper as scraper_lib
+import player_sync
 # scraper.py's own save_to_db() assumes its module is run with cwd=scripts/
 # (see init_db.DB_PATH, a relative path) -- redirect it to the same
 # absolute DB_PATH this process already uses, so calling it directly from
@@ -5687,7 +5688,17 @@ def upload_scrape():
     before = conn.execute("SELECT COUNT(*) FROM raw_stats WHERE match_id=?", (match_id,)).fetchone()[0]
     conn.close()
 
-    scraper_lib.save_to_db(players, match_id, gw_number, home_team, away_team, goals_home, goals_away, rescrape=rescrape)
+    sync = scraper_lib.save_to_db(players, match_id, gw_number, home_team, away_team,
+                                  goals_home, goals_away, rescrape=rescrape) or {}
+    if sync.get('flags') and sentry_sdk is not None:
+        # Notify-and-triage: ambiguous player matches are left alone, not
+        # guessed. One fingerprint so repeat uploads land on a single issue.
+        with sentry_sdk.new_scope() as scope:
+            scope.fingerprint = ['scrape-upload-player-sync-flags']
+            scope.set_tag("handler", "player_sync")
+            sentry_sdk.capture_message(
+                f"Scrape upload match {match_id}: {len(sync['flags'])} player(s) need a look: "
+                + " | ".join(sync['flags']), level="warning")
 
     conn = get_db()
     after = conn.execute("SELECT COUNT(*) FROM raw_stats WHERE match_id=?", (match_id,)).fetchone()[0]
@@ -5697,14 +5708,49 @@ def upload_scrape():
               f"{verb} {after} player row(s) for match {match_id} (GW{gw_number}, "
               f"{home_team} {goals_home}-{goals_away} {away_team}) from a local scrape.",
               {"match_id": match_id, "gw": gw_number, "players_submitted": len(players),
-               "rows_inserted": after - before, "rescrape": rescrape})
+               "rows_inserted": after - before, "rescrape": rescrape, "players_sync": sync})
     conn.commit()
     conn.close()
 
     return jsonify({
         "status": "ok", "match_id": match_id, "gw": gw_number,
         "players_submitted": len(players), "rows_inserted": after - before, "rescrape": rescrape,
+        "players_sync": sync,
     })
+
+
+@app.route('/api/players/positions', methods=['POST'])
+def set_scraped_positions():
+    """Called by scripts/scrape_and_upload.py after an upload added new
+    players: it reads each one's WhoScored profile locally (Render can't reach
+    WhoScored) and sends back {"positions": {"<whoscored_id>": ["DEF", "MID"]}}.
+    Only replaces positions that were auto-guessed from a match lineup slot --
+    never Fantrax-imported or manually edited ones (player_sync.set_profile_positions)."""
+    data = request.get_json(silent=True) or {}
+    positions = data.get('positions')
+    if not isinstance(positions, dict) or not positions:
+        return jsonify({"error": "positions must be a non-empty object"}), 400
+    conn = get_db()
+    updated, skipped = [], []
+    try:
+        for wsid, pos in positions.items():
+            try:
+                name = player_sync.set_profile_positions(conn, int(wsid), list(pos or []))
+            except (TypeError, ValueError):
+                name = None
+            (updated if name else skipped).append(name or str(wsid))
+        if updated:
+            log_audit(conn, current_manager_id(), 'scraper', 'profile_positions',
+                      f"Set WhoScored profile positions for {len(updated)} auto-added player(s).",
+                      {"updated": updated, "skipped": skipped})
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        report_error("set_scraped_positions")
+        return jsonify({"error": "Couldn't save positions"}), 500
+    finally:
+        conn.close()
+    return jsonify({"status": "ok", "updated": updated, "skipped": skipped})
 
 
 @app.route('/api/scrape/status')
