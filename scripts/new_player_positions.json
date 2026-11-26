@@ -1,0 +1,260 @@
+{
+  "David Affengruber": {
+    "club": "Fulham",
+    "whoscored_id": 423282,
+    "primary": "DEF",
+    "positions": [
+      "DEF"
+    ],
+    "note": "raw: Defender (Centre)"
+  },
+  "Alysson": {
+    "club": "Aston Villa",
+    "whoscored_id": 520919,
+    "primary": "MID",
+    "positions": [
+      "MID"
+    ],
+    "note": "raw: Attacking Midfielder (Right)"
+  },
+  "Lucas Gourna-Douath": {
+    "club": "Hull",
+    "whoscored_id": 393137,
+    "primary": "MID",
+    "positions": [
+      "MID"
+    ],
+    "note": "id from match 1983819; raw: Defensive Midfielder (C)"
+  },
+  "Ainsley Maitland-Niles": {
+    "club": "Everton",
+    "whoscored_id": 255169,
+    "primary": "DEF",
+    "positions": [
+      "DEF",
+      "MID"
+    ],
+    "note": "id from match 1983609; raw: Defender (Left, Right), Midfielder (Centre, Left, Right)"
+  },
+  "Mohamed-Ali Cho": {
+    "club": "Hull",
+    "whoscored_id": 399014,
+    "primary": "MID",
+    "positions": [
+      "MID",
+      "FW"
+    ],
+    "note": "raw: Attacking Midfielder (Centre, Right), Forward"
+  },
+  "Yann Gboho": {
+    "club": "Coventry",
+    "whoscored_id": 361815,
+    "primary": "MID",
+    "positions": [
+      "MID",
+      "FW"
+    ],
+    "note": "raw: Attacking Midfielder (Centre, Left), Forward"
+  },
+  "Jules Ahoka": {
+    "club": "Sunderland",
+    "whoscored_id": 583276,
+    "primary": "MID",
+    "positions": [
+      "MID"
+    ],
+    "note": "id from match 1983815; raw: Defensive Midfielder (C)"
+  },
+  "Honest Ahanor": {
+    "club": "Crystal Palace",
+    "whoscored_id": 535735,
+    "primary": "DEF",
+    "positions": [
+      "DEF"
+    ],
+    "note": "raw: Defender (Centre)"
+  },
+  "Hugo Larsson": {
+    "club": "Fulham",
+    "whoscored_id": 443796,
+    "primary": "MID",
+    "positions": [
+      "MID"
+    ],
+    "note": "raw: Midfielder (Centre)"
+  },
+  "Dayann Méthalie": {
+    "club": "Sunderland",
+    "whoscored_id": 534461,
+    "primary": "DEF",
+    "positions": [
+      "DEF",
+      "MID"
+    ],
+    "note": "raw: Defender (Left), Midfielder (Left)"
+  },
+  "Darío Osorio": {
+    "club": "Crystal Palace",
+    "whoscored_id": 445248,
+    "primary": "MID",
+    "positions": [
+      "MID"
+    ],
+    "note": "raw: Attacking Midfielder (Right)"
+  },
+  "Melvin Bard": {
+    "club": "Leeds",
+    "whoscored_id": 389064,
+    "primary": "DEF",
+    "positions": [
+      "DEF",
+      "MID"
+    ],
+    "note": "raw: Defender (Centre, Left), Midfielder (Left)"
+  },
+  "Robinio Vaz": {
+    "club": "Hull",
+    "whoscored_id": 511691,
+    "primary": "FW",
+    "positions": [
+      "FW"
+    ],
+    "note": "id from match 1983621; raw: Forward"
+  },
+  "Jaouen Hadjam": {
+    "club": "Brighton",
+    "whoscored_id": 438657,
+    "primary": "DEF",
+    "positions": [
+      "DEF"
+    ],
+    "note": "raw: Defender (Left)"
+  },
+  "Allan": {
+    "club": "Manchester City",
+    "whoscored_id": 521094,
+    "primary": "MID",
+    "positions": [
+      "MID"
+    ],
+    "note": "raw: Midfielder (Right)"
+  },
+  "Abdul Fatawu Issahaku": {
+    "club": "Ipswich",
+    "whoscored_id": 430985,
+    "primary": "MID",
+    "positions": [
+      "MID"
+    ],
+    "note": "id from match 1983823; raw: Attacking Midfielder (Left, Right)"
+  },
+  "Manuel Ángel": {
+    "club": "Fulham",
+    "whoscored_id": 606004,
+    "primary": "MID",
+    "positions": [
+      "MID"
+    ],
+    "note": "raw: Midfielder"
+  },
+  "Ferdi Kadıoğlu": {
+    "club": "Brighton",
+    "whoscored_id": 321958,
+    "primary": "DEF",
+    "positions": [
+      "DEF",
+      "MID"
+    ],
+    "note": "id from match 1983819; raw: Defender (Left, Right), Midfielder (Centre, Left, Right)"
+  },
+  "Jean-Mattéo Bahoya": {
+    "club": "Leeds",
+    "whoscored_id": 444748,
+    "primary": "MID",
+    "positions": [
+      "MID"
+    ],
+    "note": "raw: Attacking Midfielder (Centre, Left)"
+  },
+  "Juan Angulo": {
+    "club": "Sunderland",
+    "whoscored_id": 533382,
+    "primary": "FW",
+    "positions": [
+      "FW"
+    ],
+    "note": "id from match 1983605; raw: Forward"
+  },
+  "Dino Kaiser": {
+    "club": "Fulham",
+    "whoscored_id": 661233,
+    "primary": "GK",
+    "positions": [
+      "GK"
+    ],
+    "note": "id from match 1983821; raw: Goalkeeper"
+  },
+  "Luca Gunter": {
+    "club": "Tottenham",
+    "whoscored_id": 495905,
+    "primary": "GK",
+    "positions": [
+      "GK"
+    ],
+    "note": "id from match 1983848; raw: Goalkeeper"
+  },
+  "Michael Zetterer": {
+    "club": "Leeds",
+    "whoscored_id": 280191,
+    "primary": "GK",
+    "positions": [
+      "GK"
+    ],
+    "note": "raw: Goalkeeper"
+  },
+  "Emersonn": {
+    "club": "Ipswich",
+    "whoscored_id": 429556,
+    "primary": "FW",
+    "positions": [
+      "FW"
+    ],
+    "note": "id from match 1983823; raw: Forward"
+  },
+  "Lucas Herrington": {
+    "club": "Hull",
+    "whoscored_id": 606532,
+    "primary": "DEF",
+    "positions": [
+      "DEF"
+    ],
+    "note": "id from match 1983836; raw: Defender (Centre)"
+  },
+  "Kyran Thompson": {
+    "club": "Newcastle",
+    "whoscored_id": 651870,
+    "primary": "FW",
+    "positions": [
+      "FW"
+    ],
+    "note": "id from match 1983585; raw: Forward"
+  },
+  "Michael Mills": {
+    "club": "Newcastle",
+    "whoscored_id": 651871,
+    "primary": "FW",
+    "positions": [
+      "FW"
+    ],
+    "note": "id from match 1983585; raw: Forward"
+  },
+  "Younes Ibrahim": {
+    "club": "Brighton",
+    "whoscored_id": 554000,
+    "primary": "MID",
+    "positions": [
+      "MID"
+    ],
+    "note": "raw: Midfielder"
+  }
+}
